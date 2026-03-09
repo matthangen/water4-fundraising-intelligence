@@ -1,0 +1,58 @@
+[
+  {
+    "sf_campaign_id": "701A000001camp1",
+    "name": "FY2025 Year-End Appeal",
+    "status": "Completed",
+    "type": "Direct Mail",
+    "start_date": "2025-11-01",
+    "end_date": "2025-12-31",
+    "owner": "Sarah Johnson",
+    "contacts": 1240,
+    "opps_total": 187,
+    "opps_won": 142,
+    "amount_all": 218500,
+    "amount_won": 198000,
+    "expected_revenue": 175000,
+    "budget": 22000,
+    "actual_cost": 18400,
+    "roi": 9.76,
+    "description": "Annual year-end appeal targeting all active donors with FY impact report and matching gift opportunity.",
+    "ai_score": 88,
+    "ai_narrative": "The FY2025 Year-End Appeal was a strong performer, exceeding expected revenue by 13% with a 9.76x ROI. Leadership and Major tier donors responded at unusually high rates, likely driven by the matching gift incentive. Mid-Level and Friend tier conversion rates were below historical averages — suggest testing a $500 matching tier for this segment next year.",
+    "recommendations": [
+      "Test a $500 matching tier for Mid-Level and Friend segments in FY2026",
+      "Replicate the impact report format for mid-year stewardship mailings",
+      "Identify the 45 donors who opened but did not give — add to Q1 personal outreach queue"
+    ],
+    "segment_performance": {"leadership": 0.42, "major": 0.38, "mid_level": 0.18, "donor": 0.12},
+    "last_analyzed": "2026-03-08"
+  },
+  {
+    "sf_campaign_id": "701A000001camp2",
+    "name": "Spring 2026 Major Donor Cultivation",
+    "status": "Active",
+    "type": "Event",
+    "start_date": "2026-02-01",
+    "end_date": "2026-05-31",
+    "owner": "Michael Torres",
+    "contacts": 48,
+    "opps_total": 12,
+    "opps_won": 7,
+    "amount_all": 87000,
+    "amount_won": 72000,
+    "expected_revenue": 150000,
+    "budget": 15000,
+    "actual_cost": 8200,
+    "roi": 7.78,
+    "description": "Intimate cultivation dinners and field visit offers for top 50 Major and Leadership tier prospects.",
+    "ai_score": 71,
+    "ai_narrative": "The Spring 2026 Cultivation campaign is mid-cycle and tracking below expected revenue (48% of goal). The 7 closed gifts average $10.3K — below the Major tier average — suggesting the ask conversations may be occurring too early in the cultivation sequence. Three high-propensity prospects (Hartwell, Chen, Rodriguez) have not yet been engaged in a personal meeting.",
+    "recommendations": [
+      "Accelerate personal outreach to Hartwell, Chen, and Rodriguez before May 15",
+      "Add a field visit component for the top 5 prospects by giving capacity",
+      "Review ask timing — move major gift conversations to meeting #2, not meeting #1"
+    ],
+    "segment_performance": {"leadership": 0.58, "major": 0.31},
+    "last_analyzed": "2026-03-08"
+  }
+]

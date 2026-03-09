@@ -1,0 +1,5 @@
+functions-framework==3.*
+simple-salesforce==1.*
+google-cloud-secret-manager==2.*
+google-cloud-storage==2.*
+requests==2.*
