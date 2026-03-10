@@ -29,7 +29,7 @@ deploy_function() {
     --source="$source_dir" \
     --entry-point="$entry_point" \
     --trigger-http \
-    --allow-unauthenticated=false \
+    --no-allow-unauthenticated \
     --memory="$memory" \
     --timeout=540s \
     --set-env-vars="GCP_PROJECT=$PROJECT" \
