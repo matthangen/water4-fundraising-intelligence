@@ -54,6 +54,8 @@ React Dashboard (GitHub Pages)
 
 **GCS (`water4-fis-data`) is the source of truth.** Google Sheets writes are best-effort only — the Apps Script bridge cannot accept connections from GCP Cloud Run due to SSL restrictions.
 
+**The GCS bucket is publicly readable.** The dashboard reads JSON directly from `storage.googleapis.com` in the browser. Uniform bucket-level access is enabled, so public access is granted at the bucket level (`roles/storage.objectViewer` for `allUsers`) with CORS restricted to the GitHub Pages domain. CORS is configured on the bucket to allow GET requests from `matthangen.github.io`.
+
 ---
 
 ## Donor Scoring (Claude AI)
@@ -182,13 +184,28 @@ gsutil mb -p water4-org gs://water4-fis-data
 gcloud iam service-accounts create fis-cloud-functions \
   --project=water4-org --display-name="FIS Cloud Functions"
 
-# Grant roles
+# Grant roles to service account
 gcloud projects add-iam-policy-binding water4-org \
   --member="serviceAccount:fis-cloud-functions@water4-org.iam.gserviceaccount.com" \
   --role="roles/storage.objectAdmin"
 gcloud projects add-iam-policy-binding water4-org \
   --member="serviceAccount:fis-cloud-functions@water4-org.iam.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
+
+# Make bucket publicly readable (required for browser dashboard to read GCS directly)
+gcloud storage buckets add-iam-policy-binding gs://water4-fis-data \
+  --member=allUsers --role=roles/storage.objectViewer --project=water4-org
+
+# Set CORS so the browser on GitHub Pages can fetch from GCS
+cat > /tmp/cors.json << 'EOF'
+[{
+  "origin": ["https://YOUR_GITHUB_USERNAME.github.io", "http://localhost:5173", "http://localhost:5174"],
+  "method": ["GET"],
+  "responseHeader": ["Content-Type"],
+  "maxAgeSeconds": 3600
+}]
+EOF
+gcloud storage buckets update gs://water4-fis-data --cors-file=/tmp/cors.json --project=water4-org
 ```
 
 ### 2. Secrets
@@ -243,6 +260,14 @@ bash scripts/deploy-frontend.sh
 **Action engine is stateless.** Every run regenerates all actions from scratch. This means if a donor's situation changes overnight (they made a gift, their score improved) the action queue reflects reality the next morning. Completed actions are preserved because `complete_action` writes `status: "completed"` back to the same JSON file.
 
 **`complete_action` is the only public function.** The three batch functions use `--no-allow-unauthenticated` and are called via Cloud Scheduler with OIDC auth. `fis-complete-action` uses `--allow-unauthenticated` so the browser dashboard can call it directly without a GCP identity.
+
+**Dashboard reads live GCS data, not bundled sample data.** `api.js` defaults to `https://storage.googleapis.com/water4-fis-data` so the browser always reads the same data the Cloud Functions write to. The `deploy-frontend.sh` script also pulls the latest GCS data into `public/sample-data/` at build time as a fallback, ensuring action IDs in the bundle always match GCS. This matters because `fis-complete-action` looks up action IDs in GCS — a mismatch causes "action not found" errors.
+
+**Cloud Scheduler `attemptDeadline` must be patched manually.** `deploy.sh` does not set `attemptDeadline`. The default (180s) is too short for `fis-claude-analysis`, which takes ~240s. After every deploy, run:
+```bash
+gcloud scheduler jobs update http fis-fis-claude-analysis \
+  --attempt-deadline=300s --location=us-central1 --project=water4-org
+```
 
 ---
 
