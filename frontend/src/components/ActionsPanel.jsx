@@ -25,7 +25,13 @@ export default function ActionsPanel({ actions, donors }) {
   const pendingActions = actions.filter(a => a.status === 'pending' && !completed.has(a.action_id))
   const doneActions    = actions.filter(a => a.status !== 'pending' || completed.has(a.action_id))
 
-  const shown = filter === 'pending' ? pendingActions : doneActions
+  const shown = (filter === 'pending' ? pendingActions : doneActions)
+    .slice()
+    .sort((a, b) => {
+      if (!a.due_date) return 1
+      if (!b.due_date) return -1
+      return new Date(a.due_date) - new Date(b.due_date)
+    })
 
   // Summary stats
   const byPriority = [1, 2, 3, 4].map(p => ({
