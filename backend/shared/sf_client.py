@@ -48,7 +48,6 @@ def get_sf_client() -> Salesforce:
 CONTACT_FIELDS = """
     Id, AccountId, FirstName, LastName, Email, Phone, MobilePhone,
     MailingCity, MailingState, MailingCountry,
-    npe01__Primary_Address_Type__c,
     npsp__Primary_Affiliation__c,
     npo02__TotalOppAmount__c,
     npo02__OppAmountThisYear__c,
@@ -58,7 +57,6 @@ CONTACT_FIELDS = """
     npo02__LastCloseDate__c,
     npo02__FirstCloseDate__c,
     npo02__LastOppAmount__c,
-    npe01__Primary_Address_Type__c,
     Description,
     OwnerId, Owner.Name
 """
@@ -89,7 +87,6 @@ def fetch_all_donors(sf: Salesforce, days_back: int = 730) -> list[dict]:
         SELECT {CONTACT_FIELDS}
         FROM Contact
         WHERE npo02__TotalOppAmount__c > 0
-           OR npe03__Number_of_Recurring_Donations__c > 0
         ORDER BY npo02__TotalOppAmount__c DESC NULLS LAST
         LIMIT 5000
     """

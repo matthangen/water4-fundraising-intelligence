@@ -31,8 +31,8 @@ deploy_function() {
     --trigger-http \
     --no-allow-unauthenticated \
     --memory="$memory" \
-    --timeout=540s \
-    --set-env-vars="GCP_PROJECT=$PROJECT" \
+    --timeout=3600s \
+    --set-env-vars="GCP_PROJECT=$PROJECT,SHEETS_DISABLED=1" \
     --service-account="fis-cloud-functions@${PROJECT}.iam.gserviceaccount.com"
 
   if [ -n "$schedule" ]; then

@@ -38,6 +38,11 @@ class FISSheets:
 
     def _bridge(self, operation: str, sheet_name: str,
                 data=None, key_column: str = None) -> dict:
+        # When SHEETS_DISABLED=1 (set in Cloud Functions), skip all Sheets writes
+        # GCS is the source of truth; Sheets are informational only
+        if os.environ.get("SHEETS_DISABLED") == "1":
+            return {"skipped": True}
+
         payload = {
             "apiKey": BRIDGE_KEY,
             "operation": operation,
@@ -50,13 +55,13 @@ class FISSheets:
             payload["keyColumn"] = key_column
 
         try:
-            r = requests.post(BRIDGE_URL, json=payload, allow_redirects=False, timeout=30)
+            r = requests.post(BRIDGE_URL, json=payload, allow_redirects=False, timeout=10)
             r.raise_for_status()
             location = r.headers.get("Location")
             if not location:
                 logger.error(f"No redirect from Sheets Bridge for {sheet_name} {operation}")
                 return {"error": "No redirect from bridge"}
-            result = requests.get(location, timeout=30)
+            result = requests.get(location, timeout=10)
             return result.json()
         except Exception as e:
             logger.error(f"Sheets Bridge error ({sheet_name}, {operation}): {e}")

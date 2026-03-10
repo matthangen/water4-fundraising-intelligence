@@ -40,8 +40,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"  # Fast + cheap for batch analysis
-BATCH_SIZE   = 20                            # Donors per Claude call
-MAX_DONORS_PER_RUN = 500                     # Cap nightly batch
+BATCH_SIZE   = 10                            # Donors per Claude call (10 keeps output under 8K tokens)
+MAX_DONORS_PER_RUN = 60                      # 6 batches × ~20s sleep = ~120s, fits in 180s scheduler deadline
 
 
 # ── Entry Points ─────────────────────────────────────────────────────────────
@@ -54,8 +54,9 @@ def analyze_batch(request):
 
     sheet_id = get_secret("FIS_SHEET_ID")
     bucket_name = get_secret("GCS_BUCKET")
+    api_key = get_secret("ANTHROPIC_API_KEY")
     sheets = FISSheets(spreadsheet_id=sheet_id)
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(api_key=api_key)
     gcs = storage.Client()
     bucket = gcs.bucket(bucket_name)
 
@@ -71,10 +72,12 @@ def analyze_batch(request):
     stale = stale[:MAX_DONORS_PER_RUN]
     logger.info(f"Analyzing {len(stale)} stale donors (of {len(donors)} total)")
 
-    # Process in batches
+    # Process in batches — sleep between calls to respect 10K token/min rate limit
     updated = {}
     for i in range(0, len(stale), BATCH_SIZE):
         batch = stale[i:i + BATCH_SIZE]
+        if i > 0:
+            time.sleep(20)  # 10K token/min limit: ~1500 tokens/batch → 1 batch per 9s; 20s is safe buffer
         try:
             results = _analyze_donor_batch(client, batch)
             for sf_id, analysis in results.items():
@@ -94,12 +97,18 @@ def analyze_batch(request):
         json.dumps(merged, default=str), content_type="application/json"
     )
 
-    # Update Sheets summary rows
-    updated_donors = [donor_map[sid] for sid in updated if sid in donor_map]
-    sheets.bulk_upsert_donors(updated_donors)
+    # Sheets writes are best-effort
+    try:
+        updated_donors = [donor_map[sid] for sid in updated if sid in donor_map]
+        sheets.bulk_upsert_donors(updated_donors)
+    except Exception as e:
+        logger.warning(f"Sheets donors write skipped: {e}")
 
     stats["elapsed_seconds"] = round(time.time() - start, 1)
-    sheets.log_run("claude_analysis", stats)
+    try:
+        sheets.log_run("claude_analysis", stats)
+    except Exception as e:
+        logger.warning(f"Sheets run log skipped: {e}")
     logger.info(f"analyze_batch complete: {stats}")
     return {"status": "ok", "stats": stats}, 200
 
@@ -113,8 +122,9 @@ def analyze_donor(request):
 
     sheet_id = get_secret("FIS_SHEET_ID")
     bucket_name = get_secret("GCS_BUCKET")
+    api_key = get_secret("ANTHROPIC_API_KEY")
     sheets = FISSheets(spreadsheet_id=sheet_id)
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(api_key=api_key)
     gcs = storage.Client()
     bucket = gcs.bucket(bucket_name)
 
@@ -132,7 +142,10 @@ def analyze_donor(request):
         json.dumps(list(donor_map.values()), default=str),
         content_type="application/json"
     )
-    sheets.upsert_donor(donor_map[sf_id])
+    try:
+        sheets.upsert_donor(donor_map[sf_id])
+    except Exception as e:
+        logger.warning(f"Sheets donor upsert skipped: {e}")
     return {"status": "ok", "sf_id": sf_id, "analysis": analysis}, 200
 
 
@@ -178,7 +191,7 @@ def _analyze_donor_batch(client: anthropic.Anthropic, donors: list[dict]) -> dic
 
     message = client.messages.create(
         model=CLAUDE_MODEL,
-        max_tokens=4096,
+        max_tokens=8192,
         messages=[{"role": "user", "content": prompt}],
     )
 

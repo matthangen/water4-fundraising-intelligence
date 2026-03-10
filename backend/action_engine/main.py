@@ -124,12 +124,19 @@ def generate_actions(request):
         json.dumps(actions, default=str), content_type="application/json"
     )
 
-    # Write to Sheets
-    sheets.bulk_upsert_actions(actions)
     stats["actions_generated"] = len(actions)
 
+    # Sheets writes are best-effort
+    try:
+        sheets.bulk_upsert_actions(actions)
+    except Exception as e:
+        logger.warning(f"Sheets actions write skipped: {e}")
+
     stats["elapsed_seconds"] = round(time.time() - start, 1)
-    sheets.log_run("action_engine", stats)
+    try:
+        sheets.log_run("action_engine", stats)
+    except Exception as e:
+        logger.warning(f"Sheets run log skipped: {e}")
     logger.info(f"generate_actions complete: {stats}")
     return {"status": "ok", "stats": stats, "action_count": len(actions)}, 200
 
