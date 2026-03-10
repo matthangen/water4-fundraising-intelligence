@@ -43,6 +43,8 @@ ACTION_TYPES = {
     "recurring_ack":       {"label": "Recurring Gift Thank-You", "activity": "handwritten_note"},
     "campaign_followup":   {"label": "Campaign Follow-Up",       "activity": "email"},
     "major_cultivation":   {"label": "Major Donor Cultivation",  "activity": "meeting"},
+    "gift_thank_you":      {"label": "Handwritten Thank-You",    "activity": "handwritten_note"},
+    "checkin_90day":       {"label": "90-Day Check-In Call",     "activity": "call"},
 }
 
 # Tier definitions (annual giving thresholds)
@@ -170,6 +172,29 @@ def _generate_donor_actions(d: dict, now: datetime) -> list[dict]:
                 reason=f"Major donor cultivation — {current_tier} tier, {days_since_gift or 'unknown'} days since contact",
                 due_days=30,
             ))
+
+    # ── Action: Handwritten Thank-You Letter ─────────────────────────────────
+    last_gift_amount = float(d.get("last_gift_amount") or 0)
+    if days_since_gift is not None and days_since_gift <= 30 and last_gift_amount >= 10000:
+        actions.append(_make_action(
+            action_type="gift_thank_you",
+            donor=d,
+            priority=min({"transformational": PRI_URGENT, "leadership": PRI_URGENT,
+                          "major": PRI_HIGH}.get(current_tier, PRI_MEDIUM), PRI_HIGH),
+            reason=f"Gift of ${last_gift_amount:,.0f} received {days_since_gift} days ago — send handwritten thank-you",
+            due_days=5,
+        ))
+
+    # ── Action: 90-Day Check-In (all $10K+ donors) ────────────────────────────
+    best_yr = max(this_fy, last_fy)
+    if best_yr >= 10000 and (days_since_gift is None or days_since_gift > 90):
+        actions.append(_make_action(
+            action_type="checkin_90day",
+            donor=d,
+            priority=PRI_MEDIUM,
+            reason=f"{days_since_gift or 'unknown'} days since last gift — scheduled 90-day stewardship check-in",
+            due_days=7,
+        ))
 
     # ── Action: Recurring Gift Acknowledgement ────────────────────────────────
     if is_recurring:

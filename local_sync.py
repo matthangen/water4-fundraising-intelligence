@@ -34,9 +34,10 @@ load_dotenv()
 try:
     from simple_salesforce import Salesforce
 except ImportError:
-    print("Installing simple-salesforce...")
-    os.system(f"{sys.executable} -m pip install simple-salesforce -q")
-    from simple_salesforce import Salesforce
+    print("simple-salesforce not found. Run: .venv/bin/pip install simple-salesforce")
+    print("Or: python3 -m venv .venv && .venv/bin/pip install simple-salesforce")
+    print("Then: .venv/bin/python3 local_sync.py")
+    sys.exit(1)
 
 # ── Credentials ───────────────────────────────────────────────────────────────
 
@@ -314,6 +315,52 @@ def generate_rule_based_actions(donors):
                 })
                 break
 
+        # Thank-you handwritten letter: gift received in the last 30 days, $10K+
+        if days is not None and days <= 30 and float(d.get("last_gift_amount") or 0) >= 10000:
+            actions.append({
+                "action_id":    f"A{uuid.uuid4().hex[:8].upper()}",
+                "created_at":   now.strftime("%Y-%m-%d %H:%M:%S UTC"),
+                "due_date":     (now + timedelta(days=5)).strftime("%Y-%m-%d"),
+                "priority":     min(pri, 2),
+                "action_type":  "gift_thank_you",
+                "activity":     "handwritten_note",
+                "label":        "Handwritten Thank-You Letter",
+                "gift_officer": d.get("gift_officer", "Unassigned"),
+                "donor_name":   d.get("full_name", ""),
+                "donor_sf_id":  d.get("sf_id", ""),
+                "donor_tier":   tier,
+                "donor_ai_score": d.get("ai_score"),
+                "ask_amount":   None,
+                "reason":       f"Gift of ${d.get('last_gift_amount', 0):,.0f} received {days} days ago — send handwritten thank-you",
+                "ai_narrative": d.get("ai_narrative", ""),
+                "status":       "pending",
+                "completed_at": "",
+                "notes":        "",
+            })
+
+        # 90-day check-in: all $10K+ donors regardless of other actions
+        if best_yr >= 10000 and days is not None and days > 90:
+            actions.append({
+                "action_id":    f"A{uuid.uuid4().hex[:8].upper()}",
+                "created_at":   now.strftime("%Y-%m-%d %H:%M:%S UTC"),
+                "due_date":     (now + timedelta(days=7)).strftime("%Y-%m-%d"),
+                "priority":     pri,
+                "action_type":  "checkin_90day",
+                "activity":     "call",
+                "label":        "90-Day Check-In Call",
+                "gift_officer": d.get("gift_officer", "Unassigned"),
+                "donor_name":   d.get("full_name", ""),
+                "donor_sf_id":  d.get("sf_id", ""),
+                "donor_tier":   tier,
+                "donor_ai_score": d.get("ai_score"),
+                "ask_amount":   None,
+                "reason":       f"{days} days since last gift — scheduled 90-day stewardship check-in",
+                "ai_narrative": d.get("ai_narrative", ""),
+                "status":       "pending",
+                "completed_at": "",
+                "notes":        "",
+            })
+
         # Recurring gift coming up
         if d.get("is_recurring") and d.get("rd_next_payment"):
             try:
@@ -396,8 +443,12 @@ def main():
     print("Vite dev server will serve the updated data automatically.")
     print("Refresh http://localhost:5173/water4-fis/ to see live Salesforce data.")
 
-    # Also store in Secret Manager for Cloud Function use
-    store = input("\nAlso store SF credentials in GCP Secret Manager for Cloud Function deployment? [y/N]: ").strip().lower()
+    # Offer to store in Secret Manager for Cloud Function use
+    try:
+        store = input("\nAlso store SF credentials in GCP Secret Manager for Cloud Function deployment? [y/N]: ").strip().lower()
+    except EOFError:
+        store = "n"
+
     if store == "y":
         try:
             from google.cloud import secretmanager
@@ -417,7 +468,7 @@ def main():
             print("✅ SF_CREDENTIALS stored in Secret Manager")
         except Exception as e:
             print(f"Warning: Could not store in Secret Manager: {e}")
-            print("Run: pip install google-cloud-secret-manager")
+            print("Run: .venv/bin/pip install google-cloud-secret-manager")
 
 
 if __name__ == "__main__":
