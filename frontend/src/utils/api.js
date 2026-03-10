@@ -9,7 +9,8 @@
  *   VITE_API_BASE_URL  — Cloud Function base URL for on-demand refresh endpoints
  */
 
-const GCS_BASE  = import.meta.env.VITE_GCS_BASE_URL  || `${import.meta.env.BASE_URL}sample-data`
+const GCS_BASE  = import.meta.env.VITE_GCS_BASE_URL
+  || 'https://storage.googleapis.com/water4-fis-data'
 const API_BASE  = import.meta.env.VITE_API_BASE_URL   || null
 const COMPLETE_ACTION_URL = import.meta.env.VITE_COMPLETE_ACTION_URL
   || 'https://us-central1-water4-org.cloudfunctions.net/fis-complete-action'
