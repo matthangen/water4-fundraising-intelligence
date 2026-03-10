@@ -25,13 +25,22 @@ export default function ActionsPanel({ actions, donors }) {
   const pendingActions = actions.filter(a => a.status === 'pending' && !completed.has(a.action_id))
   const doneActions    = actions.filter(a => a.status !== 'pending' || completed.has(a.action_id))
 
-  const shown = (filter === 'pending' ? pendingActions : doneActions)
-    .slice()
-    .sort((a, b) => {
+  function sortByDate(arr) {
+    return arr.slice().sort((a, b) => {
       if (!a.due_date) return 1
       if (!b.due_date) return -1
       return new Date(a.due_date) - new Date(b.due_date)
     })
+  }
+
+  const base = filter === 'pending' ? pendingActions : doneActions
+  const officers = [...new Set(base.map(a => a.gift_officer).filter(Boolean))].sort()
+  const multiOfficer = officers.length > 1
+
+  // Group by officer, each group sorted by due_date
+  const groups = multiOfficer
+    ? officers.map(o => ({ officer: o, actions: sortByDate(base.filter(a => a.gift_officer === o)) }))
+    : [{ officer: null, actions: sortByDate(base) }]
 
   // Summary stats
   const byPriority = [1, 2, 3, 4].map(p => ({
@@ -95,7 +104,7 @@ export default function ActionsPanel({ actions, donors }) {
       </div>
 
       {/* Action list */}
-      {shown.length === 0 ? (
+      {base.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
           <div className="text-4xl mb-3">{filter === 'pending' ? '✅' : '📋'}</div>
           <p className="text-gray-400 text-sm">
@@ -103,16 +112,27 @@ export default function ActionsPanel({ actions, donors }) {
           </p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {shown.map(action => (
-            <ActionCard
-              key={action.action_id}
-              action={action}
-              expanded={expandedId === action.action_id}
-              onToggle={() => setExpandedId(prev => prev === action.action_id ? null : action.action_id)}
-              onComplete={() => markComplete(action.action_id)}
-              completed={completed.has(action.action_id)}
-            />
+        <div className="space-y-6">
+          {groups.map(({ officer, actions: groupActions }) => (
+            <div key={officer || 'all'}>
+              {officer && (
+                <h3 className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-2 px-1">
+                  {officer}
+                </h3>
+              )}
+              <div className="space-y-2">
+                {groupActions.map(action => (
+                  <ActionCard
+                    key={action.action_id}
+                    action={action}
+                    expanded={expandedId === action.action_id}
+                    onToggle={() => setExpandedId(prev => prev === action.action_id ? null : action.action_id)}
+                    onComplete={() => markComplete(action.action_id)}
+                    completed={completed.has(action.action_id)}
+                  />
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}
