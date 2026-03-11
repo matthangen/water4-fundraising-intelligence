@@ -9,11 +9,19 @@ export default function App() {
   const [actions, setActions] = useState([])
   const [error, setError] = useState(null)
   const [lastRefresh, setLastRefresh] = useState(null)
+  const [currentUser, setCurrentUser] = useState(null)  // { email, name, picture, sf_user_id }
 
   async function load() {
     setState('loading')
     try {
-      const [d, c, a] = await Promise.all([fetchDonors(), fetchCampaigns(), fetchActions()])
+      // Fetch user identity + data in parallel
+      const [meResult, d, c, a] = await Promise.all([
+        fetch('/api/me').then(r => r.ok ? r.json() : null).catch(() => null),
+        fetchDonors(),
+        fetchCampaigns(),
+        fetchActions(),
+      ])
+      if (meResult?.authenticated) setCurrentUser(meResult)
       setDonors(d)
       setCampaigns(c)
       setActions(a)
@@ -67,6 +75,7 @@ export default function App() {
       actions={actions}
       lastRefresh={lastRefresh}
       onRefresh={load}
+      currentUser={currentUser}
     />
   )
 }

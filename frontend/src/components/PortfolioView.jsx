@@ -1,5 +1,9 @@
 import { useMemo } from 'react'
-import { formatCurrency, classifyTier } from '../utils/tiers.js'
+import { formatCurrency, classifyTier, TIERS } from '../utils/tiers.js'
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Legend, PieChart, Pie, Cell,
+} from 'recharts'
 
 function TierBar({ tier, donors }) {
   const maxCount = Math.max(...donors.map(g => g.count), 1)
@@ -143,10 +147,43 @@ export default function PortfolioView({ donors, campaigns, actions }) {
 
   const yoyChange = totalLastFY > 0 ? ((totalThisFY - totalLastFY) / totalLastFY) * 100 : null
 
+  // Capacity utilization: recommended caseload ~150 donors per officer
+  const RECOMMENDED_CASELOAD = 200
+  const capacityData = useMemo(() => {
+    const map = {}
+    for (const d of donors) {
+      const o = d.gift_officer || 'Unassigned'
+      if (!map[o]) map[o] = { name: o, active: 0 }
+      map[o].active++
+    }
+    return Object.values(map)
+      .filter(o => o.name !== 'Unassigned')
+      .map(o => ({ ...o, utilization: Math.round((o.active / RECOMMENDED_CASELOAD) * 100) }))
+      .sort((a, b) => b.utilization - a.utilization)
+  }, [donors])
+  const avgUtilization = capacityData.length > 0
+    ? Math.round(capacityData.reduce((s, o) => s + o.utilization, 0) / capacityData.length) : 0
+
+  // Segment breakdown: This FY vs Last FY by tier for bar chart
+  const segmentComparison = useMemo(() => {
+    return tierGroups.map(g => ({
+      name: g.label,
+      'This FY': g.amount,
+      'Last FY': donors
+        .filter(d => classifyTier(Math.max(d.giving_this_fy || 0, d.giving_last_fy || 0)).id === g.id)
+        .reduce((s, d) => s + (d.giving_last_fy || 0), 0),
+      color: g.color,
+      count: g.count,
+    }))
+  }, [tierGroups, donors])
+
+  // Pie chart data for donor count by tier
+  const pieData = tierGroups.map(g => ({ name: g.label, value: g.count, color: g.color }))
+
   return (
     <div className="space-y-6">
       {/* Top stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">This FY</p>
           <p className="text-2xl font-bold text-gray-800">{formatCurrency(totalThisFY, true)}</p>
@@ -170,6 +207,13 @@ export default function PortfolioView({ donors, campaigns, actions }) {
           <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Upgrade Ready</p>
           <p className="text-2xl font-bold text-emerald-600">{upgradeReady}</p>
           <p className="text-xs text-gray-400">donors at ≥60% upgrade propensity</p>
+        </div>
+        <div className={`bg-white rounded-xl border p-4 ${avgUtilization > 100 ? 'border-red-200' : avgUtilization >= 70 ? 'border-amber-200' : 'border-gray-200'}`}>
+          <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Capacity Utilization</p>
+          <p className={`text-2xl font-bold ${avgUtilization > 100 ? 'text-red-500' : avgUtilization >= 70 ? 'text-amber-600' : 'text-gray-800'}`}>
+            {avgUtilization}%
+          </p>
+          <p className="text-xs text-gray-400">avg across {capacityData.length} officers</p>
         </div>
       </div>
 
@@ -195,6 +239,69 @@ export default function PortfolioView({ donors, campaigns, actions }) {
           ))}
         </div>
       </div>
+
+      {/* Segment Comparison + Donor Pie */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Segment Revenue: This FY vs Last FY</h3>
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={segmentComparison} layout="vertical">
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+              <XAxis type="number" tickFormatter={v => formatCurrency(v, true)} tick={{ fontSize: 11 }} />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={110} />
+              <Tooltip formatter={v => formatCurrency(v)} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Bar dataKey="This FY" radius={[0, 4, 4, 0]}>
+                {segmentComparison.map((s, i) => <Cell key={i} fill={s.color} />)}
+              </Bar>
+              <Bar dataKey="Last FY" fill="#D1D5DB" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Portfolio Composition</h3>
+          <ResponsiveContainer width="100%" height={260}>
+            <PieChart>
+              <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={95}
+                paddingAngle={2} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                labelLine={{ stroke: '#9ca3af', strokeWidth: 1 }}
+              >
+                {pieData.map((d, i) => <Cell key={i} fill={d.color} />)}
+              </Pie>
+              <Tooltip formatter={(v, name) => [`${v} donors`, name]} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Capacity Utilization by Officer */}
+      {capacityData.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Capacity Utilization by Officer</h3>
+          <p className="text-xs text-gray-400 mb-4">Recommended caseload: {RECOMMENDED_CASELOAD} donors per officer</p>
+          <div className="space-y-2">
+            {capacityData.map(o => (
+              <div key={o.name} className="flex items-center gap-3">
+                <span className="text-sm font-medium text-gray-700 w-32 shrink-0 truncate">{o.name}</span>
+                <div className="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${Math.min(o.utilization, 100)}%`,
+                      backgroundColor: o.utilization > 100 ? '#EF4444' : o.utilization >= 70 ? '#D97706' : '#1B4D5C',
+                    }}
+                  />
+                </div>
+                <span className={`text-xs font-bold w-12 text-right ${o.utilization > 100 ? 'text-red-500' : o.utilization >= 70 ? 'text-amber-600' : 'text-gray-600'}`}>
+                  {o.utilization}%
+                </span>
+                <span className="text-xs text-gray-400 w-16 text-right">{o.active} donors</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 p-5">

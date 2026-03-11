@@ -98,6 +98,25 @@ if [ "$TARGET" = "complete_action" ] || [ "$TARGET" = "all" ]; then
   echo "  ✅ fis-complete-action deployed (public)"
 fi
 
+if [ "$TARGET" = "update_stage" ] || [ "$TARGET" = "all" ]; then
+  prep_source "backend/complete_action"
+  echo "Deploying fis-update-stage (public)..."
+  gcloud functions deploy "fis-update-stage" \
+    --gen2 \
+    --project="$PROJECT" \
+    --region="$REGION" \
+    --runtime="$RUNTIME" \
+    --source="backend/complete_action" \
+    --entry-point="update_stage" \
+    --trigger-http \
+    --allow-unauthenticated \
+    --memory="256MB" \
+    --timeout=60s \
+    --set-env-vars="GCP_PROJECT=$PROJECT,SHEETS_DISABLED=1" \
+    --service-account="fis-cloud-functions@${PROJECT}.iam.gserviceaccount.com"
+  echo "  ✅ fis-update-stage deployed (public)"
+fi
+
 echo ""
 echo "=== All functions deployed! ==="
 echo ""

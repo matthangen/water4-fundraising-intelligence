@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"  # Fast + cheap for batch analysis
 BATCH_SIZE   = 10                            # Donors per Claude call (10 keeps output under 8K tokens)
-MAX_DONORS_PER_RUN = 60                      # 6 batches × ~20s sleep = ~120s, fits in 180s scheduler deadline
+MAX_DONORS_PER_RUN = 800                     # 80 batches × ~40s = ~3200s, fits in 3600s function timeout
 
 
 # ── Entry Points ─────────────────────────────────────────────────────────────
@@ -66,10 +66,11 @@ def analyze_batch(request):
     except Exception as e:
         return {"status": "error", "message": f"Could not load donors from GCS: {e}"}, 500
 
-    # Filter to donors needing analysis (not analyzed in 7 days)
+    # Filter to donors needing analysis — prioritize never-analyzed, then stale (>7 days)
     stale_cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
-    stale = [d for d in donors if not d.get("last_analyzed") or d["last_analyzed"] < stale_cutoff]
-    stale = stale[:MAX_DONORS_PER_RUN]
+    never_analyzed = [d for d in donors if not d.get("last_analyzed")]
+    stale_analyzed = [d for d in donors if d.get("last_analyzed") and d["last_analyzed"] < stale_cutoff]
+    stale = (never_analyzed + stale_analyzed)[:MAX_DONORS_PER_RUN]
     logger.info(f"Analyzing {len(stale)} stale donors (of {len(donors)} total)")
 
     # Process in batches — sleep between calls to respect 10K token/min rate limit

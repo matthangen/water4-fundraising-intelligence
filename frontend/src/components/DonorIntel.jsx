@@ -1,5 +1,10 @@
 import { useState, useMemo } from 'react'
 import { formatCurrency, formatDate, classifyTier, daysSince } from '../utils/tiers.js'
+import { STAGES, updateStage } from '../utils/api.js'
+import {
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+} from 'recharts'
 
 const SORT_OPTIONS = [
   { id: 'ai_score',         label: 'AI Score'         },
@@ -36,7 +41,7 @@ function RFMBadge({ r, f, m }) {
   )
 }
 
-export default function DonorIntel({ donors }) {
+export default function DonorIntel({ donors, currentUser }) {
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState('ai_score')
   const [tierFilter, setTierFilter] = useState('all')
@@ -175,7 +180,7 @@ export default function DonorIntel({ donors }) {
                   isExpanded && (
                     <tr key={`${donor.sf_id}-exp`} className="bg-teal/5">
                       <td colSpan={9} className="px-4 py-4">
-                        <DonorDetail donor={donor} />
+                        <DonorDetail donor={donor} currentUser={currentUser} />
                       </td>
                     </tr>
                   )
@@ -210,7 +215,34 @@ export default function DonorIntel({ donors }) {
   )
 }
 
-function DonorDetail({ donor }) {
+function DonorDetail({ donor, currentUser }) {
+  const [stage, setStage] = useState(donor.stage || '')
+  const [pendingStage, setPendingStage] = useState(stage)
+  const [stageNotes, setStageNotes] = useState('')
+  const [stageSaving, setStageSaving] = useState(false)
+  const [stageError, setStageError] = useState(null)
+  const [stageSaved, setStageSaved] = useState(false)
+
+  const stageChanged = pendingStage !== stage
+
+  async function handleSaveStage() {
+    if (!stageChanged) return
+    setStageSaving(true)
+    setStageError(null)
+    setStageSaved(false)
+    try {
+      await updateStage(donor.account_id, pendingStage, stageNotes, currentUser?.sf_user_id)
+      setStage(pendingStage)
+      setStageNotes('')
+      setStageSaved(true)
+      setTimeout(() => setStageSaved(false), 3000)
+    } catch (e) {
+      setStageError(e.message || 'Save failed')
+    } finally {
+      setStageSaving(false)
+    }
+  }
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {donor.ai_narrative && (
@@ -219,17 +251,173 @@ function DonorDetail({ donor }) {
           <p className="text-sm text-gray-700 leading-relaxed">{donor.ai_narrative}</p>
         </div>
       )}
-      {donor.ask_rationale && (
+
+      {/* Donor Profile Radar + Engagement + Giving Comparison */}
+      <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-3">
+        {/* Radar chart */}
         <div className="bg-white rounded-lg p-3 border border-gray-200">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Ask Rationale</p>
-          <p className="text-sm text-gray-700">{donor.ask_rationale}</p>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Donor Profile</p>
+          <ResponsiveContainer width="100%" height={200}>
+            <RadarChart data={[
+              { metric: 'AI Score',  value: Math.min((donor.ai_score || 0), 100), fullMark: 100 },
+              { metric: 'Retention', value: Math.round((1 - (donor.lapse_risk || 0)) * 100), fullMark: 100 },
+              { metric: 'Upgrade',   value: Math.round((donor.upgrade_propensity || 0) * 100), fullMark: 100 },
+              { metric: 'Recency',   value: (donor.rfm_recency || 0) * 20, fullMark: 100 },
+              { metric: 'Frequency', value: (donor.rfm_frequency || 0) * 20, fullMark: 100 },
+              { metric: 'Monetary',  value: (donor.rfm_monetary || 0) * 20, fullMark: 100 },
+            ]}>
+              <PolarGrid stroke="#e5e7eb" />
+              <PolarAngleAxis dataKey="metric" tick={{ fontSize: 10, fill: '#6b7280' }} />
+              <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
+              <Radar dataKey="value" stroke="#1B4D5C" fill="#1B4D5C" fillOpacity={0.25} strokeWidth={2} />
+            </RadarChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Engagement Score */}
+        <div className="bg-white rounded-lg p-3 border border-gray-200">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Engagement Score</p>
+          {(() => {
+            const score = donor.ai_score || 0
+            const lapse = donor.lapse_risk || 0
+            const upgrade = donor.upgrade_propensity || 0
+            // Composite engagement: weighted blend
+            const engagement = Math.round(score * 0.4 + (1 - lapse) * 100 * 0.3 + upgrade * 100 * 0.3)
+            const color = engagement >= 70 ? '#059669' : engagement >= 40 ? '#D97706' : '#EF4444'
+            const ringPct = Math.min(engagement, 100)
+            return (
+              <div className="flex flex-col items-center">
+                <div className="relative w-28 h-28">
+                  <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="#f3f4f6" strokeWidth="8" />
+                    <circle cx="50" cy="50" r="42" fill="none" stroke={color} strokeWidth="8"
+                      strokeDasharray={`${ringPct * 2.64} 264`} strokeLinecap="round" />
+                  </svg>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-2xl font-bold" style={{ color }}>{engagement}</span>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-400 mt-2">
+                  {engagement >= 70 ? 'Highly Engaged' : engagement >= 40 ? 'Moderately Engaged' : 'Low Engagement'}
+                </p>
+                <div className="mt-3 w-full space-y-1 text-xs">
+                  <div className="flex justify-between"><span className="text-gray-500">AI Score</span><span className="font-semibold">{score}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Lapse Risk</span><span className="font-semibold">{(lapse * 100).toFixed(0)}%</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Upgrade</span><span className="font-semibold">{(upgrade * 100).toFixed(0)}%</span></div>
+                  {donor.days_since_last_gift != null && (
+                    <div className="flex justify-between"><span className="text-gray-500">Days Since Gift</span><span className="font-semibold">{donor.days_since_last_gift ?? daysSince(donor.last_gift_date) ?? '—'}</span></div>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
+        </div>
+
+        {/* Giving Comparison + Next Ask */}
+        <div className="bg-white rounded-lg p-3 border border-gray-200 flex flex-col">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Giving Comparison</p>
+          <ResponsiveContainer width="100%" height={120}>
+            <BarChart data={[
+              { name: 'Last FY', value: donor.giving_last_fy || 0 },
+              { name: 'This FY', value: donor.giving_this_fy || 0 },
+              ...(donor.ask_amount ? [{ name: 'Next Ask', value: donor.ask_amount }] : []),
+            ]}>
+              <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+              <YAxis tick={{ fontSize: 10 }} tickFormatter={v => formatCurrency(v, true)} width={50} />
+              <Tooltip formatter={v => formatCurrency(v)} />
+              <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                <Cell fill="#94A3B8" />
+                <Cell fill="#1B4D5C" />
+                {donor.ask_amount && <Cell fill="#C4963E" />}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
           {donor.ask_amount && (
-            <p className="text-sm font-bold text-teal mt-1">
+            <div className="mt-auto pt-3 border-t border-gray-100">
+              <div className="bg-gold/10 rounded-lg p-2.5 border border-gold/20">
+                <p className="text-xs font-semibold text-gold uppercase tracking-wider mb-0.5">Recommended Ask</p>
+                <p className="text-lg font-bold text-gray-800">{formatCurrency(donor.ask_amount)}</p>
+                {donor.ask_rationale && (
+                  <p className="text-xs text-gray-500 mt-1">{donor.ask_rationale}</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Ask Rationale */}
+      {(donor.ask_rationale || donor.ask_amount) && (
+        <div className="md:col-span-2 bg-white rounded-lg p-3 border border-teal/20">
+          <p className="text-xs font-semibold text-teal/70 uppercase tracking-wider mb-1">AI Recommendation</p>
+          {donor.ask_amount && (
+            <p className="text-sm font-bold text-teal mb-1">
               Recommended ask: {formatCurrency(donor.ask_amount)}
             </p>
           )}
+          {donor.ask_rationale && (
+            <p className="text-sm text-gray-700">{donor.ask_rationale}</p>
+          )}
         </div>
       )}
+
+      {/* Pipeline Stage */}
+      <div className="md:col-span-2 bg-white rounded-lg p-3 border border-gray-200">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Pipeline Stage</p>
+        <div className="flex flex-wrap items-start gap-2">
+          <select
+            value={pendingStage}
+            onChange={e => { setPendingStage(e.target.value); setStageSaved(false) }}
+            disabled={stageSaving}
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white focus:outline-none focus:border-teal disabled:opacity-50"
+          >
+            <option value="">— No stage set —</option>
+            {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          {stageChanged && (
+            <>
+              <input
+                type="text"
+                placeholder="Notes (optional)"
+                value={stageNotes}
+                onChange={e => setStageNotes(e.target.value)}
+                disabled={stageSaving}
+                className="flex-1 min-w-32 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-teal disabled:opacity-50"
+              />
+              <button
+                onClick={handleSaveStage}
+                disabled={stageSaving}
+                className="text-sm bg-teal text-white px-3 py-1.5 rounded-lg font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {stageSaving ? 'Saving...' : 'Save to Salesforce'}
+              </button>
+            </>
+          )}
+          {stageSaved && !stageChanged && (
+            <span className="text-xs text-emerald-600 font-medium self-center">Saved</span>
+          )}
+        </div>
+        {stageError && <p className="text-xs text-red-600 mt-1">{stageError}</p>}
+      </div>
+
+      {/* Action Plans */}
+      {(donor.current_action_plan || donor.previous_action_plan) && (
+        <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+          {donor.current_action_plan && (
+            <div className="bg-white rounded-lg p-3 border border-blue-100">
+              <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">Current Action Plan</p>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{donor.current_action_plan}</p>
+            </div>
+          )}
+          {donor.previous_action_plan && (
+            <div className="bg-white rounded-lg p-3 border border-gray-200">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Previous Action Plan</p>
+              <p className="text-sm text-gray-600 whitespace-pre-wrap">{donor.previous_action_plan}</p>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="bg-white rounded-lg p-3 border border-gray-200">
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Giving Summary</p>
         <div className="space-y-1 text-xs">

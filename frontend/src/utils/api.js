@@ -14,6 +14,21 @@ const GCS_BASE  = import.meta.env.VITE_GCS_BASE_URL
 const API_BASE  = import.meta.env.VITE_API_BASE_URL   || null
 const COMPLETE_ACTION_URL = import.meta.env.VITE_COMPLETE_ACTION_URL
   || 'https://us-central1-water4-org.cloudfunctions.net/fis-complete-action'
+const UPDATE_STAGE_URL = import.meta.env.VITE_UPDATE_STAGE_URL
+  || 'https://us-central1-water4-org.cloudfunctions.net/fis-update-stage'
+
+export const STAGES = [
+  'Blocked',
+  'Identification and Qualification',
+  'Cultivation',
+  'Discovery',
+  'Co-Design',
+  'Proposal',
+  'Decision Making',
+  'Closing and Onboarding',
+  'Stewardship and Retention',
+  'Referrals & Network Expansion',
+]
 
 export async function fetchDonors() {
   const r = await fetch(`${GCS_BASE}/donors/latest.json`)
@@ -45,6 +60,23 @@ export async function completeAction(actionId, notes = '') {
   })
   if (!r.ok) {
     let msg = `Complete failed: ${r.status}`
+    try { const e = await r.json(); msg = e.message || msg } catch {}
+    throw new Error(msg)
+  }
+  return r.json()
+}
+
+/**
+ * Update a donor's pipeline stage in Salesforce.
+ */
+export async function updateStage(accountId, stage, notes = '', ownerSfId = '') {
+  const r = await fetch(UPDATE_STAGE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ account_id: accountId, stage, notes, owner_sf_id: ownerSfId }),
+  })
+  if (!r.ok) {
+    let msg = `Stage update failed: ${r.status}`
     try { const e = await r.json(); msg = e.message || msg } catch {}
     throw new Error(msg)
   }

@@ -30,14 +30,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Tier definitions (annual giving thresholds)
-TIER_ORDER = ["transformational", "leadership", "major", "mid_level", "donor", "friend"]
+TIER_ORDER = ["transformational", "leadership", "major", "mid_level", "donor", "prospect"]
 TIER_MIN   = {
     "transformational": 100000,
     "leadership":        25000,
     "major":             10000,
     "mid_level":          5000,
     "donor":              1000,
-    "friend":                1,
+    "prospect":              0,
 }
 
 
@@ -45,7 +45,7 @@ def _classify_tier(amount: float) -> str:
     for tier in TIER_ORDER:
         if amount >= TIER_MIN[tier]:
             return tier
-    return "friend"
+    return "prospect"
 
 
 # Annual stewardship calendar: tier → list of steps
@@ -86,8 +86,11 @@ CALENDAR = {
         (270, 365, "annual_ask",      "email",            "Annual Ask Email",                  4,  21, 1.0),
         (366, 9999,"lapse_outreach",  "email",            "Lapse Recovery Email",              4,  21, 1.0),
     ],
-    "friend": [
-        (270, 9999,"annual_ask",      "email",            "Annual Appeal Email",               4,  30, None),
+    "prospect": [
+        # Small donors ($1–$999): wealth screen first, then qualify, then appeal
+        (0,   180, "wealth_screen",     "research",   "Wealth Screen",                     4,  14, None),
+        (181, 365, "qualify_cultivate", "call",       "Qualify & Cultivation Call",         4,  21, None),
+        (366, 9999,"annual_ask",        "email",      "Annual Appeal Email",                5,  30, None),
     ],
 }
 
@@ -181,6 +184,18 @@ def _generate_donor_actions(d: dict, now: datetime) -> list[dict]:
                 ))
                 break  # one calendar step per donor per sync
 
+    # ── Prospect with no gift history — queue wealth screen immediately ──────
+    if tier == "prospect" and days is None:
+        actions.append(_make_action(
+            action_type="wealth_screen",
+            donor=d,
+            priority=4,
+            reason="No gift history — wealth screen to determine cultivation potential",
+            due_days=30,
+            activity_override="research",
+            label_override="Wealth Screen",
+        ))
+
     # ── Upgrade ask (independent of calendar) ───────────────────────────────
     TIER_THRESHOLDS = [1000, 5000, 10000, 25000, 100000, 250000]
     for threshold in TIER_THRESHOLDS:
@@ -188,7 +203,7 @@ def _generate_donor_actions(d: dict, now: datetime) -> list[dict]:
             gap = threshold - best_yr
             ask = int(threshold * 0.9)
             upgrade_pri = {"transformational": 1, "leadership": 1, "major": 2,
-                           "mid_level": 2, "donor": 3, "friend": 4}.get(tier, 3)
+                           "mid_level": 2, "donor": 3, "prospect": 4}.get(tier, 3)
             actions.append(_make_action(
                 action_type="upgrade_ask",
                 donor=d,
@@ -246,9 +261,11 @@ def _make_action(
         "action_type":    action_type,
         "activity":       activity_override or "call",
         "label":          label_override or action_type.replace("_", " ").title(),
-        "gift_officer":   donor.get("gift_officer", "Unassigned"),
-        "donor_name":     donor.get("full_name", "Unknown"),
-        "donor_sf_id":    donor.get("sf_id", ""),
+        "gift_officer":      donor.get("gift_officer", "Unassigned"),
+        "gift_officer_sf_id": donor.get("gift_officer_id", ""),
+        "donor_name":        donor.get("full_name", "Unknown"),
+        "donor_sf_id":       donor.get("sf_id", ""),
+        "donor_account_id":  donor.get("account_id", ""),
         "donor_tier":     _classify_tier(max(
             float(donor.get("giving_this_fy") or 0),
             float(donor.get("giving_last_fy") or 0),

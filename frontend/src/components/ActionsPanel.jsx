@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { formatCurrency, formatDate, daysSince, classifyTier } from '../utils/tiers.js'
-import { completeAction } from '../utils/api.js'
+import { completeAction, updateStage, STAGES } from '../utils/api.js'
 
 const PRIORITY_LABEL = { 1: 'Urgent', 2: 'High', 3: 'Medium', 4: 'Low' }
 const PRIORITY_COLOR = {
@@ -18,10 +18,19 @@ const ACTIVITY_ICON = {
   field_visit:      '✈️',
 }
 
-export default function ActionsPanel({ actions, donors }) {
+export default function ActionsPanel({ actions, donors, currentUser }) {
   const [filter, setFilter] = useState('pending')
   const [expandedId, setExpandedId] = useState(null)
   const [completed, setCompleted] = useState(new Set())
+  const [search, setSearch] = useState('')
+
+  // Build quick lookups
+  const donorStageMap = Object.fromEntries(
+    (donors || []).map(d => [d.sf_id, d.stage || ''])
+  )
+  const donorMap = Object.fromEntries(
+    (donors || []).map(d => [d.sf_id, d])
+  )
 
   const pendingActions = actions.filter(a => a.status === 'pending' && !completed.has(a.action_id))
   const doneActions    = actions.filter(a => a.status !== 'pending' || completed.has(a.action_id))
@@ -34,7 +43,16 @@ export default function ActionsPanel({ actions, donors }) {
     })
   }
 
-  const base = filter === 'pending' ? pendingActions : doneActions
+  const allBase = filter === 'pending' ? pendingActions : doneActions
+  const base = search.trim()
+    ? allBase.filter(a => {
+        const q = search.trim().toLowerCase()
+        return a.donor_name?.toLowerCase().includes(q)
+            || a.gift_officer?.toLowerCase().includes(q)
+            || a.label?.toLowerCase().includes(q)
+            || a.reason?.toLowerCase().includes(q)
+      })
+    : allBase
   const officers = [...new Set(base.map(a => a.gift_officer).filter(Boolean))].sort()
   const multiOfficer = officers.length > 1
 
@@ -86,6 +104,17 @@ export default function ActionsPanel({ actions, donors }) {
         </div>
       )}
 
+      {/* Search + Filter */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <input
+          type="search"
+          placeholder="Search by donor, officer, or activity..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="flex-1 min-w-48 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-teal"
+        />
+      </div>
+
       {/* Filter toggle */}
       <div className="flex items-center gap-2 mb-4">
         <button
@@ -130,6 +159,9 @@ export default function ActionsPanel({ actions, donors }) {
                     onToggle={() => setExpandedId(prev => prev === action.action_id ? null : action.action_id)}
                     onComplete={() => markComplete(action.action_id)}
                     completed={completed.has(action.action_id)}
+                    initialStage={donorStageMap[action.donor_sf_id] || ''}
+                    donor={donorMap[action.donor_sf_id] || null}
+                    currentUser={currentUser}
                   />
                 ))}
               </div>
@@ -141,11 +173,37 @@ export default function ActionsPanel({ actions, donors }) {
   )
 }
 
-function ActionCard({ action, expanded, onToggle, onComplete, completed }) {
+function ActionCard({ action, expanded, onToggle, onComplete, completed, initialStage, donor, currentUser }) {
   const [confirming, setConfirming] = useState(false)
   const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+
+  const [stage, setStage] = useState(initialStage)
+  const [pendingStage, setPendingStage] = useState(initialStage)
+  const [stageNotes, setStageNotes] = useState('')
+  const [stageSaving, setStageSaving] = useState(false)
+  const [stageError, setStageError] = useState(null)
+  const [stageSaved, setStageSaved] = useState(false)
+
+  const stageChanged = pendingStage !== stage
+
+  async function handleSaveStage(e) {
+    e.stopPropagation()
+    setStageSaving(true)
+    setStageError(null)
+    try {
+      await updateStage(action.donor_account_id || action.donor_sf_id, pendingStage, stageNotes, currentUser?.sf_user_id)
+      setStage(pendingStage)
+      setStageNotes('')
+      setStageSaved(true)
+      setTimeout(() => setStageSaved(false), 3000)
+    } catch (err) {
+      setStageError(err.message || 'Save failed')
+    } finally {
+      setStageSaving(false)
+    }
+  }
 
   const priorityClass = PRIORITY_COLOR[action.priority] || PRIORITY_COLOR[3]
   const dueDate = action.due_date ? new Date(action.due_date) : null
@@ -273,12 +331,222 @@ function ActionCard({ action, expanded, onToggle, onComplete, completed }) {
       {/* Expanded detail */}
       {expanded && !confirming && (
         <div className="px-4 pb-4 pt-0 border-t border-gray-100 mt-1">
-          {action.ai_narrative && (
+          {/* AI Narrative */}
+          {(action.ai_narrative || donor?.ai_narrative) && (
             <div className="bg-teal/5 rounded-lg p-3 mt-3">
               <p className="text-xs font-semibold text-teal/70 uppercase tracking-wider mb-1">Donor Portrait</p>
-              <p className="text-sm text-gray-700 leading-relaxed">{action.ai_narrative}</p>
+              <p className="text-sm text-gray-700 leading-relaxed">{action.ai_narrative || donor.ai_narrative}</p>
             </div>
           )}
+
+          {/* AI Recommendation */}
+          {(() => {
+            const askAmt = donor?.ask_amount || action.ask_amount
+            const askRat = donor?.ask_rationale || action.ask_rationale
+            if (!askAmt && !askRat) return null
+            return (
+              <div className="mt-3 bg-teal/5 rounded-lg p-3 border border-teal/20">
+                <p className="text-xs font-semibold text-teal/70 uppercase tracking-wider mb-1">AI Recommendation</p>
+                {askAmt > 0 && (
+                  <p className="text-sm font-bold text-teal mb-1">
+                    Recommended ask: {formatCurrency(askAmt)}
+                  </p>
+                )}
+                {askRat && (
+                  <p className="text-sm text-gray-700">{askRat}</p>
+                )}
+              </div>
+            )
+          })()}
+
+          {/* Donor Intelligence */}
+          {(() => {
+            const d = donor
+            const aiScore = d?.ai_score ?? action.donor_ai_score
+            const tier = d?.donor_tier || action.donor_tier
+            const askAmt = d?.ask_amount || action.ask_amount
+            const askRat = d?.ask_rationale || action.ask_rationale
+            return (
+            <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-white rounded-lg p-3 border border-gray-200">
+                <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Giving Summary</p>
+                <div className="space-y-1 text-xs">
+                  {d ? (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Total lifetime</span>
+                        <span className="font-semibold">{formatCurrency(d.total_giving)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">This FY</span>
+                        <span className="font-semibold">{formatCurrency(d.giving_this_fy)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Last FY</span>
+                        <span className="font-semibold">{formatCurrency(d.giving_last_fy)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Gift count</span>
+                        <span className="font-semibold">{d.gift_count}</span>
+                      </div>
+                      {d.last_gift_date && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Last gift</span>
+                          <span className="font-semibold">{daysSince(d.last_gift_date)}d ago</span>
+                        </div>
+                      )}
+                      {d.is_recurring && (
+                        <div className="flex justify-between text-emerald-600">
+                          <span>Recurring ({d.rd_period})</span>
+                          <span className="font-semibold">{formatCurrency(d.rd_amount)}</span>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {tier && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Tier</span>
+                          <span className="font-semibold capitalize">{tier.replace('_', '-')}</span>
+                        </div>
+                      )}
+                      <p className="text-gray-400 italic">Full giving data available in Donors tab</p>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-white rounded-lg p-3 border border-gray-200">
+                <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">AI Scores</p>
+                <div className="space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">AI Score</span>
+                    <span className={`font-bold ${(aiScore || 0) >= 70 ? 'text-emerald-600' : (aiScore || 0) >= 40 ? 'text-amber-600' : 'text-red-500'}`}>
+                      {aiScore != null ? Math.round(aiScore) : '—'}
+                    </span>
+                  </div>
+                  {d && (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Lapse Risk</span>
+                        <span className={`font-bold ${(d.lapse_risk || 0) >= 0.6 ? 'text-red-500' : (d.lapse_risk || 0) >= 0.3 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                          {d.lapse_risk != null ? `${(d.lapse_risk * 100).toFixed(0)}%` : '—'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Upgrade</span>
+                        <span className={`font-bold ${(d.upgrade_propensity || 0) >= 0.6 ? 'text-emerald-600' : 'text-gray-600'}`}>
+                          {d.upgrade_propensity != null ? `${(d.upgrade_propensity * 100).toFixed(0)}%` : '—'}
+                        </span>
+                      </div>
+                      {(d.rfm_recency || d.rfm_frequency || d.rfm_monetary) && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">RFM</span>
+                          <span className="font-mono text-gray-700">
+                            R{d.rfm_recency ?? '?'} F{d.rfm_frequency ?? '?'} M{d.rfm_monetary ?? '?'}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {d ? (
+                <div className="bg-white rounded-lg p-3 border border-gray-200">
+                  <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Contact</p>
+                  <div className="space-y-1 text-xs text-gray-600">
+                    {d.email && <p>{d.email}</p>}
+                    {d.phone && <p>{d.phone}</p>}
+                    {(d.city || d.state) && (
+                      <p>{[d.city, d.state].filter(Boolean).join(', ')}</p>
+                    )}
+                    {d.gift_officer && <p className="text-gray-400">Officer: {d.gift_officer}</p>}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-white rounded-lg p-3 border border-gray-200">
+                  <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Officer</p>
+                  <div className="space-y-1 text-xs text-gray-600">
+                    {action.gift_officer && <p className="font-medium">{action.gift_officer}</p>}
+                  </div>
+                </div>
+              )}
+
+              {(askAmt || d?.current_action_plan) && (
+                <div className="bg-white rounded-lg p-3 border border-gray-200">
+                  {askAmt && (
+                    <>
+                      <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Recommended Ask</p>
+                      <p className="text-lg font-bold text-teal">{formatCurrency(askAmt)}</p>
+                      {askRat && (
+                        <p className="text-xs text-gray-500 mt-1">{askRat}</p>
+                      )}
+                    </>
+                  )}
+                  {d?.current_action_plan && (
+                    <div className={askAmt ? 'mt-2 pt-2 border-t border-gray-100' : ''}>
+                      <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Action Plan</p>
+                      <p className="text-xs text-gray-600">{d.current_action_plan}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            )
+          })()}
+
+          {/* Pipeline Stage */}
+          <div className="mt-3 bg-gray-50 rounded-lg p-3 border border-gray-200">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Pipeline Stage</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={pendingStage}
+                onChange={e => { setPendingStage(e.target.value); setStageSaved(false) }}
+                onClick={e => e.stopPropagation()}
+                disabled={stageSaving}
+                className="border border-gray-200 rounded-lg px-2 py-1 text-xs text-gray-700 bg-white focus:outline-none focus:border-teal disabled:opacity-50"
+              >
+                <option value="">— No stage set —</option>
+                {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              {donor?.stage_entry_date && (
+                <span className="text-xs text-gray-400">
+                  Stage since: <span className="text-gray-600">{formatDate(donor.stage_entry_date)}</span>
+                </span>
+              )}
+              {donor?.current_action_plan_date && (
+                <span className="text-xs text-gray-400">
+                  Action plan: <span className="text-gray-600">{formatDate(donor.current_action_plan_date)}</span>
+                </span>
+              )}
+              {stageChanged && (
+                <>
+                  <input
+                    type="text"
+                    placeholder="Notes (optional)"
+                    value={stageNotes}
+                    onChange={e => setStageNotes(e.target.value)}
+                    onClick={e => e.stopPropagation()}
+                    disabled={stageSaving}
+                    className="flex-1 min-w-24 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-teal disabled:opacity-50"
+                  />
+                  <button
+                    onClick={handleSaveStage}
+                    disabled={stageSaving}
+                    className="text-xs bg-teal text-white px-2.5 py-1 rounded-lg font-medium hover:opacity-90 disabled:opacity-50"
+                  >
+                    {stageSaving ? 'Saving...' : 'Save to SF'}
+                  </button>
+                </>
+              )}
+              {stageSaved && !stageChanged && (
+                <span className="text-xs text-emerald-600 font-medium">✓ Saved</span>
+              )}
+            </div>
+            {stageError && <p className="text-xs text-red-600 mt-1">{stageError}</p>}
+          </div>
+
           <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-gray-500">
             <span>Action ID: <span className="font-mono text-gray-700">{action.action_id}</span></span>
             <span>Donor SF ID: <span className="font-mono text-gray-700">{action.donor_sf_id}</span></span>

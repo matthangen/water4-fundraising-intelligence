@@ -3,5 +3,5 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/water4-fundraising-intelligence/',
+  base: process.env.VITE_BASE_PATH || '/water4-fundraising-intelligence/',
 })

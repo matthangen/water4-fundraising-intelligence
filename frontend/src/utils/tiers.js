@@ -9,7 +9,6 @@ export const TIERS = [
   { id: 'major',            label: 'Major',            min:  10000, color: '#C4963E', bg: 'bg-amber-100',  text: 'text-amber-700',  border: 'border-amber-200'  },
   { id: 'mid_level',        label: 'Mid-Level',        min:   5000, color: '#0891B2', bg: 'bg-sky-100',    text: 'text-sky-700',    border: 'border-sky-200'    },
   { id: 'donor',            label: 'Donor',            min:   1000, color: '#059669', bg: 'bg-emerald-100',text: 'text-emerald-700',border: 'border-emerald-200'},
-  { id: 'friend',           label: 'Friend',           min:      1, color: '#64748B', bg: 'bg-slate-100',  text: 'text-slate-600',  border: 'border-slate-200'  },
   { id: 'prospect',         label: 'Prospect',         min:      0, color: '#94A3B8', bg: 'bg-gray-100',   text: 'text-gray-500',   border: 'border-gray-200'   },
 ]
 

@@ -1,12 +1,22 @@
 import { useState } from 'react'
-import ActionsPanel   from './ActionsPanel.jsx'
-import DonorIntel     from './DonorIntel.jsx'
-import CampaignIndex  from './CampaignIndex.jsx'
-import PortfolioView  from './PortfolioView.jsx'
+import ActionsPanel        from './ActionsPanel.jsx'
+import DonorIntel          from './DonorIntel.jsx'
+import CampaignIndex       from './CampaignIndex.jsx'
+import PortfolioView       from './PortfolioView.jsx'
+import IntelligenceGuide   from './IntelligenceGuide.jsx'
+import ExecutiveDashboard  from './ExecutiveDashboard.jsx'
+import PipelineDashboard   from './PipelineDashboard.jsx'
+import OfficersView        from './OfficersView.jsx'
 
-export default function Dashboard({ donors, campaigns, actions, lastRefresh, onRefresh }) {
+export default function Dashboard({ donors, campaigns, actions, lastRefresh, onRefresh, currentUser }) {
   const [activeTab, setActiveTab] = useState('actions')
-  const [selectedOfficer, setSelectedOfficer] = useState('all')
+
+  // Default officer filter to the logged-in user (matched by Salesforce User ID)
+  const myOfficerName = currentUser?.sf_user_id
+    ? donors.find(d => d.gift_officer_id === currentUser.sf_user_id)?.gift_officer || 'all'
+    : 'all'
+
+  const [selectedOfficer, setSelectedOfficer] = useState(myOfficerName)
 
   const urgentCount = actions.filter(a => a.priority <= 2 && a.status === 'pending').length
   const pendingCount = actions.filter(a => a.status === 'pending').length
@@ -14,10 +24,14 @@ export default function Dashboard({ donors, campaigns, actions, lastRefresh, onR
   const officers = [...new Set(donors.map(d => d.gift_officer).filter(Boolean))].sort()
 
   const TABS = [
+    { id: 'guide',     label: 'How It Works' },
+    { id: 'executive', label: 'Executive Dashboard' },
     { id: 'actions',   label: 'Action Queue',    badge: urgentCount || null, badgeColor: 'bg-red-500' },
     { id: 'donors',    label: `Donors (${donors.length})` },
+    { id: 'pipeline',  label: 'Pipeline' },
     { id: 'campaigns', label: `Campaigns (${campaigns.length})` },
     { id: 'portfolio', label: 'Portfolio View' },
+    { id: 'officers', label: 'Officers' },
   ]
 
   const filteredActions = selectedOfficer === 'all'
@@ -49,6 +63,20 @@ export default function Dashboard({ donors, campaigns, actions, lastRefresh, onR
           >
             Refresh
           </button>
+          {currentUser && (
+            <div className="flex items-center gap-2 pl-3 border-l border-white/20">
+              {currentUser.picture && (
+                <img src={currentUser.picture} alt="" className="w-6 h-6 rounded-full" />
+              )}
+              <span className="text-white/60 text-xs">{currentUser.name}</span>
+              <a
+                href="/auth/logout"
+                className="text-white/40 hover:text-white text-xs transition-colors"
+              >
+                Sign out
+              </a>
+            </div>
+          )}
         </div>
       </nav>
 
@@ -75,7 +103,7 @@ export default function Dashboard({ donors, campaigns, actions, lastRefresh, onR
               </button>
             ))}
           </div>
-          {officers.length > 1 && (
+          {officers.length > 1 && activeTab !== 'guide' && (
             <div className="flex items-center gap-2 py-2">
               <span className="text-xs text-gray-400">Officer:</span>
               <select
@@ -95,12 +123,24 @@ export default function Dashboard({ donors, campaigns, actions, lastRefresh, onR
 
       <main className="flex-1 px-6 py-6 max-w-7xl mx-auto w-full">
 
+        {activeTab === 'guide' && (
+          <IntelligenceGuide />
+        )}
+
+        {activeTab === 'executive' && (
+          <ExecutiveDashboard donors={filteredDonors} campaigns={campaigns} actions={filteredActions} />
+        )}
+
         {activeTab === 'actions' && (
-          <ActionsPanel actions={filteredActions} donors={filteredDonors} />
+          <ActionsPanel actions={filteredActions} donors={donors} currentUser={currentUser} />
         )}
 
         {activeTab === 'donors' && (
-          <DonorIntel donors={filteredDonors} />
+          <DonorIntel donors={filteredDonors} currentUser={currentUser} />
+        )}
+
+        {activeTab === 'pipeline' && (
+          <PipelineDashboard donors={filteredDonors} campaigns={campaigns} actions={filteredActions} />
         )}
 
         {activeTab === 'campaigns' && (
@@ -109,6 +149,10 @@ export default function Dashboard({ donors, campaigns, actions, lastRefresh, onR
 
         {activeTab === 'portfolio' && (
           <PortfolioView donors={filteredDonors} campaigns={campaigns} actions={filteredActions} />
+        )}
+
+        {activeTab === 'officers' && (
+          <OfficersView donors={donors} campaigns={campaigns} actions={actions} />
         )}
 
       </main>
