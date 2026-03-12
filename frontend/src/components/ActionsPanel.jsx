@@ -173,9 +173,20 @@ export default function ActionsPanel({ actions, donors, currentUser }) {
   )
 }
 
+const MEANINGFUL_CONVERSATION_OPTIONS = [
+  'Face to Face',
+  'Conversation Longer Than 10 Minutes',
+  'Verbal Commitment',
+  'Referrals',
+  'Founders Club Invite',
+  'Headquarter Tour',
+  'Log / Made an Ask with amount',
+]
+
 function ActionCard({ action, expanded, onToggle, onComplete, completed, initialStage, donor, currentUser }) {
   const [confirming, setConfirming] = useState(false)
   const [notes, setNotes] = useState('')
+  const [meaningfulConversation, setMeaningfulConversation] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
@@ -214,10 +225,11 @@ function ActionCard({ action, expanded, onToggle, onComplete, completed, initial
     setLoading(true)
     setError(null)
     try {
-      await completeAction(action.action_id, notes)
+      await completeAction(action.action_id, notes, meaningfulConversation.join(';'), currentUser?.sf_user_id)
       onComplete()
       setConfirming(false)
       setNotes('')
+      setMeaningfulConversation([])
     } catch (e) {
       setError(e.message || 'Something went wrong')
     } finally {
@@ -228,7 +240,12 @@ function ActionCard({ action, expanded, onToggle, onComplete, completed, initial
   function handleCancel() {
     setConfirming(false)
     setNotes('')
+    setMeaningfulConversation([])
     setError(null)
+  }
+
+  function toggleConversation(opt) {
+    setMeaningfulConversation(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt])
   }
 
   return (
@@ -300,6 +317,25 @@ function ActionCard({ action, expanded, onToggle, onComplete, completed, initial
       {confirming && (
         <div className="px-4 pb-4 pt-3 border-t border-emerald-100 bg-emerald-50/40 rounded-b-xl">
           <p className="text-xs font-semibold text-emerald-700 mb-2">Log this activity as completed?</p>
+          <div className="mb-2">
+            <label className="block text-xs text-gray-500 mb-1">Held Meaningful Conversation</label>
+            <div className="flex flex-wrap gap-1.5">
+              {MEANINGFUL_CONVERSATION_OPTIONS.map(opt => (
+                <button
+                  key={opt}
+                  onClick={() => toggleConversation(opt)}
+                  disabled={loading}
+                  className={`text-[11px] px-2 py-1 rounded-lg font-medium border transition-colors disabled:opacity-50 ${
+                    meaningfulConversation.includes(opt)
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-emerald-400'
+                  }`}
+                >
+                  {meaningfulConversation.includes(opt) && '✓ '}{opt}
+                </button>
+              ))}
+            </div>
+          </div>
           <textarea
             value={notes}
             onChange={e => setNotes(e.target.value)}

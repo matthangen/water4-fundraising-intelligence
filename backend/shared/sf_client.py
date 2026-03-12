@@ -77,6 +77,17 @@ OPP_FIELDS = """
     CampaignId, Campaign.Name, npe01__Contact_Id_for_Role__c
 """
 
+TASK_FIELDS = """
+    Id, WhoId, Subject, Status, ActivityDate, Description,
+    Type, TaskSubtype, OwnerId, Owner.Name, CreatedDate,
+    Held_Meaningful_Conversation__c
+"""
+
+EVENT_FIELDS = """
+    Id, WhoId, Subject, StartDateTime, EndDateTime, Description,
+    Type, OwnerId, Owner.Name, CreatedDate
+"""
+
 
 def fetch_all_donors(sf: Salesforce, days_back: int = 730) -> list[dict]:
     """
@@ -134,18 +145,107 @@ def fetch_all_donors(sf: Salesforce, days_back: int = 730) -> list[dict]:
         logger.warning(f"Could not fetch recurring donations: {e}")
         rds_by_contact = {}
 
+    # Fetch activity history (Tasks + Events) for all contacts
+    activities_by_contact = _fetch_activities(sf, list(contacts.keys()), days_back)
+
     # Normalize into donor dicts
     donors = []
     fy_start = _fiscal_year_start()
     for cid, c in contacts.items():
-        donor = _normalize_contact(c, opps_by_contact.get(cid, []), rds_by_contact.get(cid), fy_start)
+        donor = _normalize_contact(
+            c, opps_by_contact.get(cid, []), rds_by_contact.get(cid), fy_start,
+            activities_by_contact.get(cid, [])
+        )
         donors.append(donor)
 
     logger.info(f"Normalized {len(donors)} donors")
     return donors
 
 
-def _normalize_contact(c: dict, opps: list, rd: dict | None, fy_start: datetime) -> dict:
+def _fetch_activities(sf: Salesforce, contact_ids: list[str], days_back: int = 730) -> dict[str, list]:
+    """Fetch Task and Event records for a list of contacts, grouped by WhoId."""
+    if not contact_ids:
+        return {}
+
+    since = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%d")
+    activities_by_contact: dict[str, list] = {}
+
+    # Fetch Tasks (calls, emails, logged activities)
+    # Process in chunks of 200 to avoid SOQL IN clause limits
+    for i in range(0, len(contact_ids), 200):
+        chunk = contact_ids[i:i + 200]
+        ids_str = "','".join(chunk)
+        try:
+            tasks_soql = f"""
+                SELECT {TASK_FIELDS}
+                FROM Task
+                WHERE WhoId IN ('{ids_str}')
+                  AND ActivityDate >= {since}
+                ORDER BY ActivityDate DESC
+                LIMIT 10000
+            """
+            result = sf.query_all(tasks_soql)
+            for t in result["records"]:
+                cid = t.get("WhoId")
+                if cid:
+                    activities_by_contact.setdefault(cid, []).append({
+                        "type": "task",
+                        "subject": t.get("Subject", ""),
+                        "date": t.get("ActivityDate", ""),
+                        "status": t.get("Status", ""),
+                        "task_type": t.get("Type", ""),
+                        "subtype": t.get("TaskSubtype", ""),
+                        "owner": (t.get("Owner") or {}).get("Name", ""),
+                        "description": (t.get("Description") or "")[:200],
+                        "held_meaningful_conversation": t.get("Held_Meaningful_Conversation__c", ""),
+                    })
+            logger.info(f"Fetched {len(result['records'])} tasks (chunk {i//200 + 1})")
+        except Exception as e:
+            logger.warning(f"Could not fetch tasks (chunk {i//200 + 1}): {e}")
+
+    # Fetch Events (meetings, visits)
+    for i in range(0, len(contact_ids), 200):
+        chunk = contact_ids[i:i + 200]
+        ids_str = "','".join(chunk)
+        try:
+            events_soql = f"""
+                SELECT {EVENT_FIELDS}
+                FROM Event
+                WHERE WhoId IN ('{ids_str}')
+                  AND StartDateTime >= {since}T00:00:00Z
+                ORDER BY StartDateTime DESC
+                LIMIT 10000
+            """
+            result = sf.query_all(events_soql)
+            for e in result["records"]:
+                cid = e.get("WhoId")
+                if cid:
+                    activities_by_contact.setdefault(cid, []).append({
+                        "type": "event",
+                        "subject": e.get("Subject", ""),
+                        "date": (e.get("StartDateTime") or "")[:10],
+                        "event_type": e.get("Type", ""),
+                        "owner": (e.get("Owner") or {}).get("Name", ""),
+                        "description": (e.get("Description") or "")[:200],
+                    })
+            logger.info(f"Fetched {len(result['records'])} events (chunk {i//200 + 1})")
+        except Exception as e:
+            logger.warning(f"Could not fetch events (chunk {i//200 + 1}): {e}")
+
+    # Sort each contact's activities by date descending, keep most recent 20
+    for cid in activities_by_contact:
+        activities_by_contact[cid] = sorted(
+            activities_by_contact[cid],
+            key=lambda a: a.get("date", ""),
+            reverse=True
+        )[:20]
+
+    total = sum(len(v) for v in activities_by_contact.values())
+    logger.info(f"Total activities fetched: {total} across {len(activities_by_contact)} contacts")
+    return activities_by_contact
+
+
+def _normalize_contact(c: dict, opps: list, rd: dict | None, fy_start: datetime, activities: list | None = None) -> dict:
     """Convert a Salesforce Contact + related records into a flat donor dict."""
     total_giving = float(c.get("npo02__TotalOppAmount__c") or 0)
     giving_this_fy = float(c.get("npo02__OppAmountThisYear__c") or 0)
@@ -203,6 +303,9 @@ def _normalize_contact(c: dict, opps: list, rd: dict | None, fy_start: datetime)
         "rd_next_payment": rd_next_payment,
         "rd_established": rd_established,
         "recent_gifts": recent_gifts,
+        "activities": activities or [],
+        "activity_count": len(activities or []),
+        "last_activity_date": (activities[0]["date"] if activities else ""),
         # Populated by Claude analysis layer:
         "ai_score": None,
         "ai_narrative": "",

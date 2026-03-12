@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { formatCurrency, formatDate, classifyTier, daysSince } from '../utils/tiers.js'
-import { STAGES, updateStage } from '../utils/api.js'
+import { STAGES, updateStage, updatePipelineInfo, logAsk, logMeaningfulConversation } from '../utils/api.js'
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
@@ -215,6 +215,21 @@ export default function DonorIntel({ donors, currentUser }) {
   )
 }
 
+const MEANINGFUL_CONVERSATION_OPTIONS = [
+  'Face to Face',
+  'Conversation Longer Than 10 Minutes',
+  'Verbal Commitment',
+  'Referrals',
+  'Founders Club Invite',
+  'Headquarter Tour',
+  'Log / Made an Ask with amount',
+]
+
+const ASK_TYPES = ['Annual', 'Major Gift', 'Planned Gift', 'Capital Campaign', 'Event Sponsorship', 'Corporate Partnership', 'Grant', 'Other']
+const CONFIDENCE_LEVELS = ['Very High', 'High', 'Medium', 'Low', 'Very Low']
+const DONOR_TYPES = ['Individual', 'Organization', 'Foundation', 'Corporation', 'Church', 'Government', 'Other']
+const ASK_STYLES = ['In Person', 'Phone Call', 'Video Call', 'Email', 'Written Proposal', 'Event', 'Other']
+
 function DonorDetail({ donor, currentUser }) {
   const [stage, setStage] = useState(donor.stage || '')
   const [pendingStage, setPendingStage] = useState(stage)
@@ -222,6 +237,38 @@ function DonorDetail({ donor, currentUser }) {
   const [stageSaving, setStageSaving] = useState(false)
   const [stageError, setStageError] = useState(null)
   const [stageSaved, setStageSaved] = useState(false)
+
+  // Pipeline Information fields
+  const [stageEntryDate, setStageEntryDate] = useState(donor.stage_entry_date || '')
+  const [actionPlanDate, setActionPlanDate] = useState(donor.current_action_plan_date || '')
+  const [currentActionPlan, setCurrentActionPlan] = useState(donor.current_action_plan || '')
+  const [previousActionPlan, setPreviousActionPlan] = useState(donor.previous_action_plan || '')
+  const [pipelineSaving, setPipelineSaving] = useState(false)
+  const [pipelineError, setPipelineError] = useState(null)
+  const [pipelineSaved, setPipelineSaved] = useState(false)
+
+  const pipelineChanged =
+    stageEntryDate !== (donor.stage_entry_date || '') ||
+    actionPlanDate !== (donor.current_action_plan_date || '') ||
+    currentActionPlan !== (donor.current_action_plan || '') ||
+    previousActionPlan !== (donor.previous_action_plan || '')
+
+  // Log An Ask form
+  const [showAskForm, setShowAskForm] = useState(false)
+  const [askForm, setAskForm] = useState({
+    amount_requested: '',
+    due_date: '',
+    ask_type: '',
+    contact_name: donor.full_name || '',
+    confidence_level: '',
+    organization_name: '',
+    donor_type: '',
+    style_of_ask: '',
+    comments: '',
+  })
+  const [askSaving, setAskSaving] = useState(false)
+  const [askError, setAskError] = useState(null)
+  const [askSaved, setAskSaved] = useState(false)
 
   const stageChanged = pendingStage !== stage
 
@@ -240,6 +287,63 @@ function DonorDetail({ donor, currentUser }) {
       setStageError(e.message || 'Save failed')
     } finally {
       setStageSaving(false)
+    }
+  }
+
+  async function handleSavePipelineInfo() {
+    setPipelineSaving(true)
+    setPipelineError(null)
+    setPipelineSaved(false)
+    try {
+      await updatePipelineInfo(donor.account_id, {
+        stage_entry_date: stageEntryDate,
+        current_action_plan_date: actionPlanDate,
+        current_action_plan: currentActionPlan,
+        previous_action_plan: previousActionPlan,
+      }, currentUser?.sf_user_id)
+      setPipelineSaved(true)
+      setTimeout(() => setPipelineSaved(false), 3000)
+    } catch (e) {
+      setPipelineError(e.message || 'Save failed')
+    } finally {
+      setPipelineSaving(false)
+    }
+  }
+
+  async function handleLogAsk() {
+    if (!askForm.amount_requested) {
+      setAskError('Amount Requested is required')
+      return
+    }
+    setAskSaving(true)
+    setAskError(null)
+    setAskSaved(false)
+    try {
+      await logAsk({
+        account_id: donor.account_id,
+        donor_sf_id: donor.sf_id,
+        owner_sf_id: currentUser?.sf_user_id,
+        ...askForm,
+        amount_requested: parseFloat(askForm.amount_requested) || 0,
+      })
+      setAskSaved(true)
+      setShowAskForm(false)
+      setAskForm({
+        amount_requested: '',
+        due_date: '',
+        ask_type: '',
+        contact_name: donor.full_name || '',
+        confidence_level: '',
+        organization_name: '',
+        donor_type: '',
+        style_of_ask: '',
+        comments: '',
+      })
+      setTimeout(() => setAskSaved(false), 3000)
+    } catch (e) {
+      setAskError(e.message || 'Save failed')
+    } finally {
+      setAskSaving(false)
     }
   }
 
@@ -281,7 +385,6 @@ function DonorDetail({ donor, currentUser }) {
             const score = donor.ai_score || 0
             const lapse = donor.lapse_risk || 0
             const upgrade = donor.upgrade_propensity || 0
-            // Composite engagement: weighted blend
             const engagement = Math.round(score * 0.4 + (1 - lapse) * 100 * 0.3 + upgrade * 100 * 0.3)
             const color = engagement >= 70 ? '#059669' : engagement >= 40 ? '#D97706' : '#EF4444'
             const ringPct = Math.min(engagement, 100)
@@ -400,21 +503,248 @@ function DonorDetail({ donor, currentUser }) {
         {stageError && <p className="text-xs text-red-600 mt-1">{stageError}</p>}
       </div>
 
-      {/* Action Plans */}
-      {(donor.current_action_plan || donor.previous_action_plan) && (
-        <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
-          {donor.current_action_plan && (
-            <div className="bg-white rounded-lg p-3 border border-blue-100">
-              <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">Current Action Plan</p>
-              <p className="text-sm text-gray-700 whitespace-pre-wrap">{donor.current_action_plan}</p>
-            </div>
+      {/* Pipeline Information — Feature 1 */}
+      <div className="md:col-span-2 bg-white rounded-lg p-3 border border-blue-200">
+        <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider mb-3">Pipeline Information</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Stage Entry Date</label>
+            <input
+              type="date"
+              value={stageEntryDate}
+              onChange={e => { setStageEntryDate(e.target.value); setPipelineSaved(false) }}
+              disabled={pipelineSaving}
+              className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white focus:outline-none focus:border-blue-400 disabled:opacity-50"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Current Action Plan Date</label>
+            <input
+              type="date"
+              value={actionPlanDate}
+              onChange={e => { setActionPlanDate(e.target.value); setPipelineSaved(false) }}
+              disabled={pipelineSaving}
+              className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white focus:outline-none focus:border-blue-400 disabled:opacity-50"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Current Action Plan</label>
+            <textarea
+              value={currentActionPlan}
+              onChange={e => { setCurrentActionPlan(e.target.value); setPipelineSaved(false) }}
+              disabled={pipelineSaving}
+              rows={3}
+              placeholder="Current action plan..."
+              className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white focus:outline-none focus:border-blue-400 disabled:opacity-50 resize-none"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Previous Action Plan</label>
+            <textarea
+              value={previousActionPlan}
+              onChange={e => { setPreviousActionPlan(e.target.value); setPipelineSaved(false) }}
+              disabled={pipelineSaving}
+              rows={3}
+              placeholder="Previous action plan..."
+              className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white focus:outline-none focus:border-blue-400 disabled:opacity-50 resize-none"
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-2 mt-3">
+          {pipelineChanged && (
+            <button
+              onClick={handleSavePipelineInfo}
+              disabled={pipelineSaving}
+              className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+            >
+              {pipelineSaving ? 'Saving...' : 'Save Pipeline Info to Salesforce'}
+            </button>
           )}
-          {donor.previous_action_plan && (
-            <div className="bg-white rounded-lg p-3 border border-gray-200">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Previous Action Plan</p>
-              <p className="text-sm text-gray-600 whitespace-pre-wrap">{donor.previous_action_plan}</p>
-            </div>
+          {pipelineSaved && !pipelineChanged && (
+            <span className="text-xs text-emerald-600 font-medium">Pipeline info saved</span>
           )}
+        </div>
+        {pipelineError && <p className="text-xs text-red-600 mt-1">{pipelineError}</p>}
+      </div>
+
+      {/* Log An Ask — Feature 2 */}
+      <div className="md:col-span-2 bg-white rounded-lg p-3 border border-gold/30">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-semibold text-gold uppercase tracking-wider">Log An Ask</p>
+          {!showAskForm && (
+            <button
+              onClick={() => setShowAskForm(true)}
+              className="text-xs bg-gold/10 text-gold border border-gold/30 px-3 py-1 rounded-lg font-medium hover:bg-gold/20 transition-colors"
+            >
+              + New Ask
+            </button>
+          )}
+          {askSaved && !showAskForm && (
+            <span className="text-xs text-emerald-600 font-medium">Ask logged successfully</span>
+          )}
+        </div>
+        {showAskForm && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Amount Requested *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={askForm.amount_requested}
+                  onChange={e => setAskForm(f => ({ ...f, amount_requested: e.target.value }))}
+                  disabled={askSaving}
+                  placeholder="0.00"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-gold disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Due Date</label>
+                <input
+                  type="date"
+                  value={askForm.due_date}
+                  onChange={e => setAskForm(f => ({ ...f, due_date: e.target.value }))}
+                  disabled={askSaving}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-gold disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Ask Type</label>
+                <select
+                  value={askForm.ask_type}
+                  onChange={e => setAskForm(f => ({ ...f, ask_type: e.target.value }))}
+                  disabled={askSaving}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white focus:outline-none focus:border-gold disabled:opacity-50"
+                >
+                  <option value="">Select...</option>
+                  {ASK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Contact Name</label>
+                <input
+                  type="text"
+                  value={askForm.contact_name}
+                  onChange={e => setAskForm(f => ({ ...f, contact_name: e.target.value }))}
+                  disabled={askSaving}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-gold disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Confidence Level</label>
+                <select
+                  value={askForm.confidence_level}
+                  onChange={e => setAskForm(f => ({ ...f, confidence_level: e.target.value }))}
+                  disabled={askSaving}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white focus:outline-none focus:border-gold disabled:opacity-50"
+                >
+                  <option value="">Select...</option>
+                  {CONFIDENCE_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Organization Name</label>
+                <input
+                  type="text"
+                  value={askForm.organization_name}
+                  onChange={e => setAskForm(f => ({ ...f, organization_name: e.target.value }))}
+                  disabled={askSaving}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-gold disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Donor Type</label>
+                <select
+                  value={askForm.donor_type}
+                  onChange={e => setAskForm(f => ({ ...f, donor_type: e.target.value }))}
+                  disabled={askSaving}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white focus:outline-none focus:border-gold disabled:opacity-50"
+                >
+                  <option value="">Select...</option>
+                  {DONOR_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Style of Ask</label>
+                <select
+                  value={askForm.style_of_ask}
+                  onChange={e => setAskForm(f => ({ ...f, style_of_ask: e.target.value }))}
+                  disabled={askSaving}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white focus:outline-none focus:border-gold disabled:opacity-50"
+                >
+                  <option value="">Select...</option>
+                  {ASK_STYLES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div className="md:col-span-3">
+                <label className="block text-xs text-gray-500 mb-1">Comments</label>
+                <textarea
+                  value={askForm.comments}
+                  onChange={e => setAskForm(f => ({ ...f, comments: e.target.value }))}
+                  disabled={askSaving}
+                  rows={2}
+                  placeholder="Additional notes..."
+                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-gold disabled:opacity-50 resize-none"
+                />
+              </div>
+            </div>
+            {askError && <p className="text-xs text-red-600">{askError}</p>}
+            <div className="flex gap-2">
+              <button
+                onClick={handleLogAsk}
+                disabled={askSaving}
+                className="text-sm bg-gold text-white px-3 py-1.5 rounded-lg font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {askSaving ? 'Saving...' : 'Log Ask to Salesforce'}
+              </button>
+              <button
+                onClick={() => { setShowAskForm(false); setAskError(null) }}
+                disabled={askSaving}
+                className="text-sm border border-gray-200 text-gray-600 hover:border-gray-400 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Held Meaningful Conversation — Feature 3 */}
+      <MeaningfulConversationSection donor={donor} currentUser={currentUser} />
+
+      {/* Recent Activity History */}
+      {donor.activities && donor.activities.length > 0 && (
+        <div className="md:col-span-2 bg-white rounded-lg p-3 border border-gray-200">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+            Recent Activity ({donor.activities.length})
+          </p>
+          <div className="space-y-1.5 max-h-64 overflow-y-auto">
+            {donor.activities.map((act, i) => (
+              <div key={i} className="flex items-start gap-2 text-xs border-b border-gray-50 pb-1.5">
+                <span className="shrink-0 mt-0.5">
+                  {act.type === 'event' ? '📅' : act.subtype === 'Email' ? '✉️' : act.task_type === 'Call' ? '📞' : '📋'}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-gray-700">{act.subject || 'No subject'}</span>
+                    {act.held_meaningful_conversation && (
+                      <span className="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 border border-emerald-200">
+                        {act.held_meaningful_conversation}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-gray-400">
+                    {act.date && <span>{formatDate(act.date)}</span>}
+                    {act.owner && <span> · {act.owner}</span>}
+                    {act.status && act.status !== 'Completed' && <span> · {act.status}</span>}
+                  </div>
+                  {act.description && (
+                    <p className="text-gray-500 mt-0.5 line-clamp-2">{act.description}</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -459,6 +789,89 @@ function DonorDetail({ donor, currentUser }) {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function MeaningfulConversationSection({ donor, currentUser }) {
+  const [selected, setSelected] = useState([])
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  const [saved, setSaved] = useState(false)
+
+  function toggleOption(opt) {
+    setSaved(false)
+    setSelected(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt])
+  }
+
+  async function handleSave() {
+    if (selected.length === 0) {
+      setError('Please select at least one option')
+      return
+    }
+    setSaving(true)
+    setError(null)
+    setSaved(false)
+    try {
+      await logMeaningfulConversation({
+        account_id: donor.account_id,
+        donor_sf_id: donor.sf_id,
+        owner_sf_id: currentUser?.sf_user_id,
+        held_meaningful_conversation: selected.join(';'),
+        notes,
+      })
+      setSaved(true)
+      setSelected([])
+      setNotes('')
+      setTimeout(() => setSaved(false), 3000)
+    } catch (e) {
+      setError(e.message || 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="md:col-span-2 bg-white rounded-lg p-3 border border-emerald-200">
+      <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wider mb-2">Held Meaningful Conversation</p>
+      <div className="flex flex-wrap gap-2 mb-2">
+        {MEANINGFUL_CONVERSATION_OPTIONS.map(opt => (
+          <button
+            key={opt}
+            onClick={() => toggleOption(opt)}
+            disabled={saving}
+            className={`text-xs px-3 py-1.5 rounded-lg font-medium border transition-colors disabled:opacity-50 ${
+              selected.includes(opt)
+                ? 'bg-emerald-600 text-white border-emerald-600'
+                : 'bg-white text-gray-600 border-gray-200 hover:border-emerald-400'
+            }`}
+          >
+            {selected.includes(opt) && '✓ '}{opt}
+          </button>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-start gap-2">
+        <input
+          type="text"
+          placeholder="Notes (optional)"
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          disabled={saving}
+          className="flex-1 min-w-32 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-400 disabled:opacity-50"
+        />
+        <button
+          onClick={handleSave}
+          disabled={saving || selected.length === 0}
+          className="text-sm bg-emerald-600 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50"
+        >
+          {saving ? 'Saving...' : 'Log to Salesforce'}
+        </button>
+        {saved && (
+          <span className="text-xs text-emerald-600 font-medium self-center">Logged</span>
+        )}
+      </div>
+      {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
     </div>
   )
 }

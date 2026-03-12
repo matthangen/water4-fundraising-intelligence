@@ -173,6 +173,16 @@ def _analyze_donor_batch(client: anthropic.Anthropic, donors: list[dict]) -> dic
             except Exception:
                 pass
 
+        # Summarize recent activities (calls, emails, meetings, visits)
+        activities = d.get("activities", [])
+        activity_summary = []
+        for act in activities[:10]:  # Include up to 10 most recent
+            entry = f"{act.get('date', '?')}: {act.get('type', '?')} — {act.get('subject', 'No subject')}"
+            desc = act.get("description", "").strip()
+            if desc:
+                entry += f" ({desc[:100]})"
+            activity_summary.append(entry)
+
         summary = {
             "sf_id": d["sf_id"],
             "name": d.get("full_name", "Unknown"),
@@ -185,6 +195,9 @@ def _analyze_donor_batch(client: anthropic.Anthropic, donors: list[dict]) -> dic
             "is_recurring": d.get("is_recurring", False),
             "rd_amount": d.get("rd_amount", 0),
             "rd_period": d.get("rd_period", ""),
+            "activity_count": d.get("activity_count", 0),
+            "last_activity_date": d.get("last_activity_date", ""),
+            "recent_activities": activity_summary,
         }
         donor_summaries.append(summary)
 
@@ -206,7 +219,7 @@ def _build_batch_prompt(summaries: list[dict]) -> str:
 
 Analyze the following {len(summaries)} donors and return a JSON object mapping each sf_id to an analysis.
 
-Donor data:
+Donor data (includes recent activity history from calls, emails, meetings, and visits):
 {donors_json}
 
 Water4 Giving Tiers (annual):
@@ -235,6 +248,15 @@ Scoring guidelines:
 - upgrade_propensity should be higher for donors at 70%+ of next tier
 - ask_amount should never be lower than their last gift amount
 - ai_narrative should be warm, specific, and actionable for a gift officer
+
+Activity history guidelines:
+- recent_activities contains logged calls, emails, meetings, and visits from Salesforce
+- High activity frequency with recent touchpoints indicates strong engagement — boost ai_score
+- Long gaps between activities suggest the donor may feel neglected — increase lapse_risk
+- Reference specific interactions in the ai_narrative (e.g., "Recent meeting discussed field visit plans")
+- If recent activities mention asks, proposals, or commitments, factor this into ask_rationale
+- Donors with zero activities despite high giving are at risk — flag in narrative
+- Use activity patterns to recommend the right engagement style in ai_narrative
 
 Return ONLY valid JSON in this exact format (no markdown, no explanation):
 {{

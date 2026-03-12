@@ -16,6 +16,12 @@ const COMPLETE_ACTION_URL = import.meta.env.VITE_COMPLETE_ACTION_URL
   || 'https://us-central1-water4-org.cloudfunctions.net/fis-complete-action'
 const UPDATE_STAGE_URL = import.meta.env.VITE_UPDATE_STAGE_URL
   || 'https://us-central1-water4-org.cloudfunctions.net/fis-update-stage'
+const UPDATE_PIPELINE_INFO_URL = import.meta.env.VITE_UPDATE_PIPELINE_INFO_URL
+  || 'https://us-central1-water4-org.cloudfunctions.net/fis-update-pipeline-info'
+const LOG_MEANINGFUL_CONVERSATION_URL = import.meta.env.VITE_LOG_MEANINGFUL_CONVERSATION_URL
+  || 'https://us-central1-water4-org.cloudfunctions.net/fis-log-meaningful-conversation'
+const LOG_ASK_URL = import.meta.env.VITE_LOG_ASK_URL
+  || 'https://us-central1-water4-org.cloudfunctions.net/fis-log-ask'
 
 export const STAGES = [
   'Blocked',
@@ -52,11 +58,18 @@ export async function fetchActions() {
  * Mark a gift officer action as completed.
  * Posts to fis-complete-action, updates GCS and creates a Salesforce Task.
  */
-export async function completeAction(actionId, notes = '') {
+export async function completeAction(actionId, notes = '', heldMeaningfulConversation = '', ownerSfId = '') {
+  const payload = { action_id: actionId, notes }
+  if (heldMeaningfulConversation) {
+    payload.held_meaningful_conversation = heldMeaningfulConversation
+  }
+  if (ownerSfId) {
+    payload.owner_sf_id = ownerSfId
+  }
   const r = await fetch(COMPLETE_ACTION_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action_id: actionId, notes }),
+    body: JSON.stringify(payload),
   })
   if (!r.ok) {
     let msg = `Complete failed: ${r.status}`
@@ -77,6 +90,58 @@ export async function updateStage(accountId, stage, notes = '', ownerSfId = '') 
   })
   if (!r.ok) {
     let msg = `Stage update failed: ${r.status}`
+    try { const e = await r.json(); msg = e.message || msg } catch {}
+    throw new Error(msg)
+  }
+  return r.json()
+}
+
+/**
+ * Log a "Held Meaningful Conversation" task in Salesforce.
+ */
+export async function logMeaningfulConversation(data) {
+  const r = await fetch(LOG_MEANINGFUL_CONVERSATION_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!r.ok) {
+    let msg = `Log conversation failed: ${r.status}`
+    try { const e = await r.json(); msg = e.message || msg } catch {}
+    throw new Error(msg)
+  }
+  return r.json()
+}
+
+/**
+ * Update pipeline information fields on a donor's Account in Salesforce.
+ * Fields: Stage_Entry_Date__c, Current_Action_Plan_Date__c, Current_Action_Plan__c, Previous_Action_Plan__c
+ */
+export async function updatePipelineInfo(accountId, fields, ownerSfId = '') {
+  const r = await fetch(UPDATE_PIPELINE_INFO_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ account_id: accountId, ...fields, owner_sf_id: ownerSfId }),
+  })
+  if (!r.ok) {
+    let msg = `Pipeline info update failed: ${r.status}`
+    try { const e = await r.json(); msg = e.message || msg } catch {}
+    throw new Error(msg)
+  }
+  return r.json()
+}
+
+/**
+ * Log an Ask in Salesforce (creates an Opportunity).
+ */
+export async function logAsk(data) {
+  const r = await fetch(LOG_ASK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!r.ok) {
+    let msg = `Log ask failed: ${r.status}`
     try { const e = await r.json(); msg = e.message || msg } catch {}
     throw new Error(msg)
   }

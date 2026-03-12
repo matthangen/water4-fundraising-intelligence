@@ -117,6 +117,63 @@ if [ "$TARGET" = "update_stage" ] || [ "$TARGET" = "all" ]; then
   echo "  ✅ fis-update-stage deployed (public)"
 fi
 
+if [ "$TARGET" = "update_pipeline_info" ] || [ "$TARGET" = "all" ]; then
+  prep_source "backend/complete_action"
+  echo "Deploying fis-update-pipeline-info (public)..."
+  gcloud functions deploy "fis-update-pipeline-info" \
+    --gen2 \
+    --project="$PROJECT" \
+    --region="$REGION" \
+    --runtime="$RUNTIME" \
+    --source="backend/complete_action" \
+    --entry-point="update_pipeline_info" \
+    --trigger-http \
+    --allow-unauthenticated \
+    --memory="256MB" \
+    --timeout=60s \
+    --set-env-vars="GCP_PROJECT=$PROJECT,SHEETS_DISABLED=1" \
+    --service-account="fis-cloud-functions@${PROJECT}.iam.gserviceaccount.com"
+  echo "  ✅ fis-update-pipeline-info deployed (public)"
+fi
+
+if [ "$TARGET" = "log_ask" ] || [ "$TARGET" = "all" ]; then
+  prep_source "backend/complete_action"
+  echo "Deploying fis-log-ask (public)..."
+  gcloud functions deploy "fis-log-ask" \
+    --gen2 \
+    --project="$PROJECT" \
+    --region="$REGION" \
+    --runtime="$RUNTIME" \
+    --source="backend/complete_action" \
+    --entry-point="log_ask" \
+    --trigger-http \
+    --allow-unauthenticated \
+    --memory="256MB" \
+    --timeout=60s \
+    --set-env-vars="GCP_PROJECT=$PROJECT,SHEETS_DISABLED=1" \
+    --service-account="fis-cloud-functions@${PROJECT}.iam.gserviceaccount.com"
+  echo "  ✅ fis-log-ask deployed (public)"
+fi
+
+if [ "$TARGET" = "log_meaningful_conversation" ] || [ "$TARGET" = "all" ]; then
+  prep_source "backend/complete_action"
+  echo "Deploying fis-log-meaningful-conversation (public)..."
+  gcloud functions deploy "fis-log-meaningful-conversation" \
+    --gen2 \
+    --project="$PROJECT" \
+    --region="$REGION" \
+    --runtime="$RUNTIME" \
+    --source="backend/complete_action" \
+    --entry-point="log_meaningful_conversation" \
+    --trigger-http \
+    --allow-unauthenticated \
+    --memory="256MB" \
+    --timeout=60s \
+    --set-env-vars="GCP_PROJECT=$PROJECT,SHEETS_DISABLED=1" \
+    --service-account="fis-cloud-functions@${PROJECT}.iam.gserviceaccount.com"
+  echo "  ✅ fis-log-meaningful-conversation deployed (public)"
+fi
+
 echo ""
 echo "=== All functions deployed! ==="
 echo ""
