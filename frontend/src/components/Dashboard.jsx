@@ -41,8 +41,10 @@ export default function Dashboard({ donors, campaigns, actions, lastRefresh, onR
 
   const TABS = ALL_TABS.filter(t => !t.adminOnly || isAdmin)
 
-  // Non-admins are always locked to their own officer
-  const effectiveOfficer = isAdmin ? selectedOfficer : (myOfficerName !== 'all' ? myOfficerName : selectedOfficer)
+  // Non-admins are always locked to their own officer (never 'all')
+  const effectiveOfficer = isAdmin
+    ? selectedOfficer
+    : (myOfficerName !== 'all' ? myOfficerName : '__none__')
 
   const filteredActions = effectiveOfficer === 'all'
     ? actions
@@ -143,12 +145,12 @@ export default function Dashboard({ donors, campaigns, actions, lastRefresh, onR
           <IntelligenceGuide />
         )}
 
-        {activeTab === 'executive' && (
+        {activeTab === 'executive' && isAdmin && (
           <ExecutiveDashboard donors={filteredDonors} campaigns={campaigns} actions={filteredActions} />
         )}
 
         {activeTab === 'actions' && (
-          <ActionsPanel actions={filteredActions} donors={donors} currentUser={currentUser} />
+          <ActionsPanel actions={filteredActions} donors={isAdmin ? donors : filteredDonors} currentUser={currentUser} />
         )}
 
         {activeTab === 'donors' && (
@@ -160,14 +162,14 @@ export default function Dashboard({ donors, campaigns, actions, lastRefresh, onR
         )}
 
         {activeTab === 'campaigns' && (
-          <CampaignIndex campaigns={campaigns} donors={donors} />
+          <CampaignIndex campaigns={campaigns} donors={isAdmin ? donors : filteredDonors} />
         )}
 
-        {activeTab === 'portfolio' && (
+        {activeTab === 'portfolio' && isAdmin && (
           <PortfolioView donors={filteredDonors} campaigns={campaigns} actions={filteredActions} />
         )}
 
-        {activeTab === 'officers' && (
+        {activeTab === 'officers' && isAdmin && (
           <OfficersView donors={donors} campaigns={campaigns} actions={actions} />
         )}
 
