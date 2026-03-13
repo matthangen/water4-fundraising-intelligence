@@ -204,7 +204,7 @@ function ActionCard({ action, expanded, onToggle, onComplete, completed, initial
     setStageSaving(true)
     setStageError(null)
     try {
-      await updateStage(action.donor_account_id || action.donor_sf_id, pendingStage, stageNotes, currentUser?.sf_user_id)
+      await updateStage(action.donor_account_id || action.donor_sf_id, pendingStage, stageNotes, currentUser?.sf_user_id, action.donor_sf_id)
       setStage(pendingStage)
       setStageNotes('')
       setStageSaved(true)
@@ -266,6 +266,14 @@ function ActionCard({ action, expanded, onToggle, onComplete, completed, initial
           </div>
           <div className="mt-1 flex items-center gap-3 flex-wrap">
             <span className="text-sm text-gray-700 font-medium">{action.donor_name}</span>
+            {(action.donor_entity_type === 'organization') && (
+              <span className="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 border border-blue-200">ORG</span>
+            )}
+            {(action.donor_entity_type === 'affiliated_individual') && (
+              <span className="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700 border border-purple-200" title={action.donor_primary_affiliation || ''}>
+                {action.donor_primary_affiliation || 'AFFILIATED'}
+              </span>
+            )}
             {action.donor_tier && (
               <span className="text-xs text-gray-400 capitalize">{action.donor_tier.replace('_', '-')}</span>
             )}
@@ -378,7 +386,7 @@ function ActionCard({ action, expanded, onToggle, onComplete, completed, initial
           {/* AI Recommendation */}
           {(() => {
             const askAmt = donor?.ask_amount || action.ask_amount
-            const askRat = donor?.ask_rationale || action.ask_rationale
+            const askRat = donor?.ask_rationale
             if (!askAmt && !askRat) return null
             return (
               <div className="mt-3 bg-teal/5 rounded-lg p-3 border border-teal/20">
@@ -401,7 +409,7 @@ function ActionCard({ action, expanded, onToggle, onComplete, completed, initial
             const aiScore = d?.ai_score ?? action.donor_ai_score
             const tier = d?.donor_tier || action.donor_tier
             const askAmt = d?.ask_amount || action.ask_amount
-            const askRat = d?.ask_rationale || action.ask_rationale
+            const askRat = d?.ask_rationale
             return (
             <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="bg-white rounded-lg p-3 border border-gray-200">

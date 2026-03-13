@@ -253,6 +253,31 @@ def _make_action(
     now = datetime.now(timezone.utc)
     due_date = (now + timedelta(days=due_days)).strftime("%Y-%m-%d")
 
+    entity_type = donor.get("entity_type", "individual")
+    primary_aff = donor.get("primary_affiliation", "")
+
+    # Branch action language by entity_type
+    label = label_override or action_type.replace("_", " ").title()
+    if entity_type == "organization":
+        language_map = {
+            "gift_thank_you": "Institutional Thank-You Letter",
+            "impact_followup": "Impact Follow-Up with Leadership",
+            "checkin_90day": "Quarterly Institutional Check-In",
+            "annual_ask": "Annual Institutional Ask",
+            "lapse_outreach": "Lapse Recovery: Institutional Outreach",
+            "upgrade_ask": "Institutional Upgrade Ask",
+            "wealth_screen": "Organizational Research & Qualification",
+        }
+        label = language_map.get(action_type, label)
+    elif entity_type == "affiliated_individual" and primary_aff:
+        language_map = {
+            "annual_ask": f"Annual Ask (personal + institutional via {primary_aff})",
+            "upgrade_ask": f"Upgrade Ask (dual-track: personal + {primary_aff})",
+            "checkin_90day": f"Cultivation Check-In (explore {primary_aff} connection)",
+            "impact_followup": f"Impact Call (personal + {primary_aff} update)",
+        }
+        label = language_map.get(action_type, label)
+
     return {
         "action_id":      f"A{uuid.uuid4().hex[:8].upper()}",
         "created_at":     now.strftime("%Y-%m-%d %H:%M:%S UTC"),
@@ -260,7 +285,7 @@ def _make_action(
         "priority":       priority,
         "action_type":    action_type,
         "activity":       activity_override or "call",
-        "label":          label_override or action_type.replace("_", " ").title(),
+        "label":          label,
         "gift_officer":      donor.get("gift_officer", "Unassigned"),
         "gift_officer_sf_id": donor.get("gift_officer_id", ""),
         "donor_name":        donor.get("full_name", "Unknown"),
@@ -271,6 +296,8 @@ def _make_action(
             float(donor.get("giving_last_fy") or 0),
         )),
         "donor_ai_score": donor.get("ai_score"),
+        "donor_entity_type": entity_type,
+        "donor_primary_affiliation": primary_aff,
         "ask_amount":     ask_override,
         "reason":         reason,
         "ai_narrative":   donor.get("ai_narrative", ""),

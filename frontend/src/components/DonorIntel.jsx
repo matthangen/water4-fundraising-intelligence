@@ -145,7 +145,10 @@ export default function DonorIntel({ donors, currentUser }) {
                     onClick={() => setExpanded(isExpanded ? null : donor.sf_id)}
                   >
                     <td className="px-4 py-3">
-                      <div className="font-medium text-gray-800">{donor.full_name}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium text-gray-800">{donor.full_name}</span>
+                        <EntityBadge entityType={donor.entity_type} primaryAffiliation={donor.primary_affiliation} />
+                      </div>
                       {donor.gift_officer && (
                         <div className="text-xs text-gray-400">{donor.gift_officer}</div>
                       )}
@@ -215,6 +218,25 @@ export default function DonorIntel({ donors, currentUser }) {
   )
 }
 
+function EntityBadge({ entityType, primaryAffiliation }) {
+  if (!entityType || entityType === 'individual') return null
+  if (entityType === 'organization') {
+    return (
+      <span className="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 border border-blue-200" title="Organization Account">
+        ORG
+      </span>
+    )
+  }
+  if (entityType === 'affiliated_individual') {
+    return (
+      <span className="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700 border border-purple-200" title={primaryAffiliation || 'Has organizational affiliations'}>
+        {primaryAffiliation || 'AFFILIATED'}
+      </span>
+    )
+  }
+  return null
+}
+
 const MEANINGFUL_CONVERSATION_OPTIONS = [
   'Face to Face',
   'Conversation Longer Than 10 Minutes',
@@ -278,7 +300,7 @@ function DonorDetail({ donor, currentUser }) {
     setStageError(null)
     setStageSaved(false)
     try {
-      await updateStage(donor.account_id, pendingStage, stageNotes, currentUser?.sf_user_id)
+      await updateStage(donor.account_id, pendingStage, stageNotes, currentUser?.sf_user_id, donor.sf_id)
       setStage(pendingStage)
       setStageNotes('')
       setStageSaved(true)
@@ -711,6 +733,34 @@ function DonorDetail({ donor, currentUser }) {
 
       {/* Held Meaningful Conversation — Feature 3 */}
       <MeaningfulConversationSection donor={donor} currentUser={currentUser} />
+
+      {/* Affiliations */}
+      {donor.affiliations && donor.affiliations.length > 0 && (
+        <div className="md:col-span-2 bg-white rounded-lg p-3 border border-purple-200">
+          <p className="text-xs font-semibold text-purple-600 uppercase tracking-wider mb-2">
+            Organizational Affiliations ({donor.affiliations.length})
+          </p>
+          <div className="space-y-1.5">
+            {donor.affiliations.map((aff, i) => (
+              <div key={i} className="flex items-center gap-2 text-xs">
+                {aff.primary && (
+                  <span className="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700 border border-purple-200">PRIMARY</span>
+                )}
+                <span className="font-medium text-gray-700">{aff.role || 'Member'}</span>
+                <span className="text-gray-400">at</span>
+                <span className="font-medium text-gray-700">{aff.org_name || 'Unknown Org'}</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold border ${
+                  aff.status?.toLowerCase() === 'current'
+                    ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                    : 'bg-gray-100 text-gray-500 border-gray-200'
+                }`}>
+                  {aff.status || 'Unknown'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Recent Activity History */}
       {donor.activities && donor.activities.length > 0 && (

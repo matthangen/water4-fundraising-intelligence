@@ -82,11 +82,13 @@ export async function completeAction(actionId, notes = '', heldMeaningfulConvers
 /**
  * Update a donor's pipeline stage in Salesforce.
  */
-export async function updateStage(accountId, stage, notes = '', ownerSfId = '') {
+export async function updateStage(accountId, stage, notes = '', ownerSfId = '', contactSfId = '') {
+  const payload = { account_id: accountId, stage, notes, owner_sf_id: ownerSfId }
+  if (contactSfId) payload.contact_sf_id = contactSfId
   const r = await fetch(UPDATE_STAGE_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ account_id: accountId, stage, notes, owner_sf_id: ownerSfId }),
+    body: JSON.stringify(payload),
   })
   if (!r.ok) {
     let msg = `Stage update failed: ${r.status}`

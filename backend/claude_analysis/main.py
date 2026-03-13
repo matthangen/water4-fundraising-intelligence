@@ -183,9 +183,18 @@ def _analyze_donor_batch(client: anthropic.Anthropic, donors: list[dict]) -> dic
                 entry += f" ({desc[:100]})"
             activity_summary.append(entry)
 
+        # Summarize affiliations (organizational roles)
+        affiliation_summary = []
+        for aff in d.get("affiliations", [])[:5]:
+            entry = {"org": aff.get("org_name", ""), "role": aff.get("role", ""), "status": aff.get("status", "")}
+            if aff.get("primary"):
+                entry["primary"] = True
+            affiliation_summary.append(entry)
+
         summary = {
             "sf_id": d["sf_id"],
             "name": d.get("full_name", "Unknown"),
+            "entity_type": d.get("entity_type", "individual"),
             "total_giving": d.get("total_giving", 0),
             "giving_this_fy": d.get("giving_this_fy", 0),
             "giving_last_fy": d.get("giving_last_fy", 0),
@@ -198,6 +207,7 @@ def _analyze_donor_batch(client: anthropic.Anthropic, donors: list[dict]) -> dic
             "activity_count": d.get("activity_count", 0),
             "last_activity_date": d.get("last_activity_date", ""),
             "recent_activities": activity_summary,
+            "affiliations": affiliation_summary,
         }
         donor_summaries.append(summary)
 
@@ -257,6 +267,14 @@ Activity history guidelines:
 - If recent activities mention asks, proposals, or commitments, factor this into ask_rationale
 - Donors with zero activities despite high giving are at risk — flag in narrative
 - Use activity patterns to recommend the right engagement style in ai_narrative
+
+Entity type & affiliation guidelines:
+- entity_type: "individual" (personal cultivation), "organization" (institutional ask), "affiliated_individual" (person with organizational roles — highest value)
+- affiliations lists the donor's organizational roles (e.g., Board Member, Pastor, Executive Director)
+- A current Board Member or Executive Director at a foundation or major institution is a HIGH-VALUE capacity signal — boost rfm_monetary and upgrade_propensity significantly
+- Former roles are relevant context but weighted lower than current roles
+- For affiliated_individual donors, reference their organizational role in ai_narrative and consider dual-track strategy (personal + institutional)
+- For organization entity_type, frame ask_rationale around institutional giving capacity
 
 Return ONLY valid JSON in this exact format (no markdown, no explanation):
 {{
@@ -334,7 +352,7 @@ def _fallback_scores(d: dict, now_str: str) -> dict:
 
     # Next tier ask
     tiers = [0, 1000, 5000, 10000, 25000, 100000]
-    next_tier = next((t for t in tiers if t > this_fy or t > last_fy), 100000)
+    next_tier = next((t for t in tiers if t > this_fy and t > last_fy), 100000)
     ask_amount = int(max(next_tier * 0.85, (d.get("last_gift_amount") or 0) * 1.1))
 
     return {

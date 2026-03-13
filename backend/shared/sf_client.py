@@ -88,6 +88,12 @@ EVENT_FIELDS = """
     Type, OwnerId, Owner.Name, CreatedDate
 """
 
+AFFILIATION_FIELDS = """
+    Id, npe5__Contact__c, npe5__Organization__c, npe5__Organization__r.Name,
+    npe5__Role__c, npe5__Status__c, npe5__StartDate__c, npe5__EndDate__c,
+    npe5__Primary__c
+"""
+
 
 def fetch_all_donors(sf: Salesforce, days_back: int = 730) -> list[dict]:
     """
@@ -148,18 +154,62 @@ def fetch_all_donors(sf: Salesforce, days_back: int = 730) -> list[dict]:
     # Fetch activity history (Tasks + Events) for all contacts
     activities_by_contact = _fetch_activities(sf, list(contacts.keys()), days_back)
 
+    # Fetch affiliations (organizational roles)
+    affiliations_by_contact = _fetch_affiliations(sf, list(contacts.keys()))
+
     # Normalize into donor dicts
     donors = []
     fy_start = _fiscal_year_start()
     for cid, c in contacts.items():
         donor = _normalize_contact(
             c, opps_by_contact.get(cid, []), rds_by_contact.get(cid), fy_start,
-            activities_by_contact.get(cid, [])
+            activities_by_contact.get(cid, []),
+            affiliations_by_contact.get(cid, [])
         )
         donors.append(donor)
 
     logger.info(f"Normalized {len(donors)} donors")
     return donors
+
+
+def _fetch_affiliations(sf: Salesforce, contact_ids: list[str]) -> dict[str, list]:
+    """Fetch npe5__Affiliation__c records for contacts, grouped by Contact ID."""
+    if not contact_ids:
+        return {}
+
+    affiliations_by_contact: dict[str, list] = {}
+
+    for i in range(0, len(contact_ids), 200):
+        chunk = contact_ids[i:i + 200]
+        ids_str = "','".join(chunk)
+        try:
+            soql = f"""
+                SELECT {AFFILIATION_FIELDS}
+                FROM npe5__Affiliation__c
+                WHERE npe5__Contact__c IN ('{ids_str}')
+                ORDER BY npe5__Primary__c DESC, npe5__StartDate__c DESC
+            """
+            result = sf.query_all(soql)
+            for a in result["records"]:
+                cid = a.get("npe5__Contact__c")
+                if cid:
+                    org_ref = a.get("npe5__Organization__r") or {}
+                    affiliations_by_contact.setdefault(cid, []).append({
+                        "org_sf_id": a.get("npe5__Organization__c", ""),
+                        "org_name": org_ref.get("Name", ""),
+                        "role": a.get("npe5__Role__c", ""),
+                        "status": a.get("npe5__Status__c", ""),
+                        "start_date": a.get("npe5__StartDate__c", ""),
+                        "end_date": a.get("npe5__EndDate__c", ""),
+                        "primary": bool(a.get("npe5__Primary__c")),
+                    })
+            logger.info(f"Fetched {len(result['records'])} affiliations (chunk {i//200 + 1})")
+        except Exception as e:
+            logger.warning(f"Could not fetch affiliations (chunk {i//200 + 1}): {e}")
+
+    total = sum(len(v) for v in affiliations_by_contact.values())
+    logger.info(f"Total affiliations fetched: {total} across {len(affiliations_by_contact)} contacts")
+    return affiliations_by_contact
 
 
 def _fetch_activities(sf: Salesforce, contact_ids: list[str], days_back: int = 730) -> dict[str, list]:
@@ -245,7 +295,7 @@ def _fetch_activities(sf: Salesforce, contact_ids: list[str], days_back: int = 7
     return activities_by_contact
 
 
-def _normalize_contact(c: dict, opps: list, rd: dict | None, fy_start: datetime, activities: list | None = None) -> dict:
+def _normalize_contact(c: dict, opps: list, rd: dict | None, fy_start: datetime, activities: list | None = None, affiliations: list | None = None) -> dict:
     """Convert a Salesforce Contact + related records into a flat donor dict."""
     total_giving = float(c.get("npo02__TotalOppAmount__c") or 0)
     giving_this_fy = float(c.get("npo02__OppAmountThisYear__c") or 0)
@@ -273,10 +323,28 @@ def _normalize_contact(c: dict, opps: list, rd: dict | None, fy_start: datetime,
             "name": opp.get("Name", ""),
         })
 
+    # Determine entity_type based on SF ID prefix and affiliations
+    current_affiliations = [a for a in (affiliations or []) if a.get("status", "").lower() in ("current", "")]
+    sf_id = c["Id"]
+    account_id = c.get("AccountId", "")
+    if sf_id.startswith("001"):
+        entity_type = "organization"
+    elif current_affiliations:
+        entity_type = "affiliated_individual"
+    else:
+        entity_type = "individual"
+
+    # Build primary affiliation summary for display
+    primary_affiliation = None
+    if current_affiliations:
+        primary = next((a for a in current_affiliations if a.get("primary")), current_affiliations[0])
+        if primary.get("role") and primary.get("org_name"):
+            primary_affiliation = f"{primary['role']} · {primary['org_name']}"
+
     return {
-        "_id": c["Id"],
-        "sf_id": c["Id"],
-        "account_id": c.get("AccountId", ""),
+        "_id": sf_id,
+        "sf_id": sf_id,
+        "account_id": account_id,
         "first_name": c.get("FirstName", ""),
         "last_name": c.get("LastName", ""),
         "full_name": f"{c.get('FirstName', '')} {c.get('LastName', '')}".strip(),
@@ -306,6 +374,9 @@ def _normalize_contact(c: dict, opps: list, rd: dict | None, fy_start: datetime,
         "activities": activities or [],
         "activity_count": len(activities or []),
         "last_activity_date": (activities[0]["date"] if activities else ""),
+        "affiliations": affiliations or [],
+        "entity_type": entity_type,
+        "primary_affiliation": primary_affiliation,
         # Populated by Claude analysis layer:
         "ai_score": None,
         "ai_narrative": "",

@@ -141,30 +141,46 @@ def update_stage(request):
         payload = {}
 
     account_id = payload.get("account_id", "").strip()
-    contact_id = payload.get("sf_id", "").strip()  # legacy fallback
+    contact_id = payload.get("sf_id", "").strip() or payload.get("contact_sf_id", "").strip()
     stage = payload.get("stage", "").strip()
     notes = payload.get("notes", "").strip()
     owner_sf_id = payload.get("owner_sf_id", "").strip()
 
     if not account_id and not contact_id:
-        return _resp({"status": "error", "message": "account_id required"}, 400)
+        return _resp({"status": "error", "message": "account_id or sf_id/contact_sf_id required"}, 400)
     if not stage:
         return _resp({"status": "error", "message": "stage required"}, 400)
 
     try:
         sf = get_sf_client()
+
+        # Resolve account_id: if what we received is actually a Contact ID (003...), look up its Account
+        if account_id and account_id.startswith("003"):
+            logger.info(f"account_id '{account_id}' is a Contact ID — resolving to Account")
+            contact_id = contact_id or account_id
+            result = sf.query(f"SELECT AccountId FROM Contact WHERE Id = '{account_id}' LIMIT 1")
+            if result["records"] and result["records"][0].get("AccountId"):
+                account_id = result["records"][0]["AccountId"]
+                logger.info(f"Resolved Contact {contact_id} → Account {account_id}")
+            else:
+                return _resp({"status": "error", "message": f"Could not resolve Account for Contact {account_id}"}, 400)
+
         # Update Stage__c on Account (Organization level)
-        if account_id:
+        if account_id and account_id.startswith("001"):
             sf.Account.update(account_id, {"Stage__c": stage})
             logger.info(f"Updated Account.Stage__c to '{stage}' for Account {account_id}")
         elif contact_id:
-            # Legacy: if only contact_id provided, look up account and update that
+            # Fallback: resolve contact_id to account
             result = sf.query(f"SELECT AccountId FROM Contact WHERE Id = '{contact_id}' LIMIT 1")
-            if result["records"]:
+            if result["records"] and result["records"][0].get("AccountId"):
                 acct_id = result["records"][0]["AccountId"]
                 sf.Account.update(acct_id, {"Stage__c": stage})
                 account_id = acct_id
                 logger.info(f"Updated Account.Stage__c to '{stage}' for Account {acct_id} via Contact {contact_id}")
+            else:
+                return _resp({"status": "error", "message": f"Could not resolve Account for sf_id '{contact_id}'"}, 400)
+        else:
+            return _resp({"status": "error", "message": f"Cannot resolve record: account_id='{account_id}', sf_id='{contact_id}'"}, 400)
 
         if notes:
             now = datetime.now(timezone.utc)
