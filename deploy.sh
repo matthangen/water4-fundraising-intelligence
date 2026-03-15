@@ -174,6 +174,25 @@ if [ "$TARGET" = "log_meaningful_conversation" ] || [ "$TARGET" = "all" ]; then
   echo "  ✅ fis-log-meaningful-conversation deployed (public)"
 fi
 
+if [ "$TARGET" = "save_qualification" ] || [ "$TARGET" = "all" ]; then
+  prep_source "backend/save_qualification"
+  echo "Deploying fis-save-qualification (public)..."
+  gcloud functions deploy "fis-save-qualification" \
+    --gen2 \
+    --project="$PROJECT" \
+    --region="$REGION" \
+    --runtime="$RUNTIME" \
+    --source="backend/save_qualification" \
+    --entry-point="save_qualification" \
+    --trigger-http \
+    --allow-unauthenticated \
+    --memory="256MB" \
+    --timeout=60s \
+    --set-env-vars="GCP_PROJECT=$PROJECT,SHEETS_DISABLED=1" \
+    --service-account="fis-cloud-functions@${PROJECT}.iam.gserviceaccount.com"
+  echo "  ✅ fis-save-qualification deployed (public)"
+fi
+
 echo ""
 echo "=== All functions deployed! ==="
 echo ""

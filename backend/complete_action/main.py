@@ -151,6 +151,13 @@ def update_stage(request):
     if not stage:
         return _resp({"status": "error", "message": "stage required"}, 400)
 
+    # Validate Salesforce ID format (15 or 18 alphanumeric chars)
+    import re
+    _sf_id_re = re.compile(r'^[a-zA-Z0-9]{15,18}$')
+    for label, val in [("account_id", account_id), ("contact_id", contact_id), ("owner_sf_id", owner_sf_id)]:
+        if val and not _sf_id_re.match(val):
+            return _resp({"status": "error", "message": f"Invalid {label} format"}, 400)
+
     try:
         sf = get_sf_client()
 

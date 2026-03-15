@@ -10,21 +10,26 @@ export default function App() {
   const [error, setError] = useState(null)
   const [lastRefresh, setLastRefresh] = useState(null)
   const [currentUser, setCurrentUser] = useState(null)  // { email, name, picture, sf_user_id }
+  const [qualificationStatus, setQualificationStatus] = useState({})
 
   async function load() {
     setState('loading')
     try {
       // Fetch user identity + data in parallel
-      const [meResult, d, c, a] = await Promise.all([
+      const [meResult, d, c, a, qs] = await Promise.all([
         fetch('/api/me').then(r => r.ok ? r.json() : null).catch(() => null),
         fetchDonors(),
         fetchCampaigns(),
         fetchActions(),
+        fetch('https://storage.googleapis.com/water4-fis-data/qualification/status.json')
+          .then(r => r.ok ? r.json() : {})
+          .catch(() => ({})),
       ])
       if (meResult?.authenticated) setCurrentUser(meResult)
       setDonors(d)
       setCampaigns(c)
       setActions(a)
+      setQualificationStatus(qs)
       setLastRefresh(new Date())
       setState('ready')
     } catch (err) {
@@ -76,6 +81,8 @@ export default function App() {
       lastRefresh={lastRefresh}
       onRefresh={load}
       currentUser={currentUser}
+      qualificationStatus={qualificationStatus}
+      setQualificationStatus={setQualificationStatus}
     />
   )
 }

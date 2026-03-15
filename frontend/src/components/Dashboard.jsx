@@ -7,8 +7,9 @@ import IntelligenceGuide   from './IntelligenceGuide.jsx'
 import ExecutiveDashboard  from './ExecutiveDashboard.jsx'
 import PipelineDashboard   from './PipelineDashboard.jsx'
 import OfficersView        from './OfficersView.jsx'
+import QualQueue           from './QualQueue.jsx'
 
-export default function Dashboard({ donors, campaigns, actions, lastRefresh, onRefresh, currentUser }) {
+export default function Dashboard({ donors, campaigns, actions, lastRefresh, onRefresh, currentUser, qualificationStatus, setQualificationStatus }) {
   const [activeTab, setActiveTab] = useState('actions')
 
   // Default officer filter to the logged-in user (matched by Salesforce User ID)
@@ -26,12 +27,24 @@ export default function Dashboard({ donors, campaigns, actions, lastRefresh, onR
   const urgentCount = actions.filter(a => a.priority <= 2 && a.status === 'pending').length
   const pendingCount = actions.filter(a => a.status === 'pending').length
 
+  const unscreenedCount = donors.filter(d =>
+    d.gift_officer === 'Donor Services' &&
+    (d.rfm_frequency || 0) >= 4 &&
+    (d.total_giving || 0) < 5000 &&
+    !qualificationStatus[d.sf_id]
+  ).length
+
+  const handleQualificationUpdate = (sfId, record) => {
+    setQualificationStatus(prev => ({ ...prev, [sfId]: record }))
+  }
+
   const officers = [...new Set(donors.map(d => d.gift_officer).filter(Boolean))].sort()
 
   const ALL_TABS = [
     { id: 'guide',     label: 'How It Works' },
     { id: 'executive', label: 'Executive Dashboard', adminOnly: true },
     { id: 'actions',   label: 'Action Queue',    badge: urgentCount || null, badgeColor: 'bg-red-500' },
+    { id: 'qualqueue', label: 'Qual Queue',      badge: unscreenedCount || null, badgeColor: 'bg-amber-500', donorServicesOnly: true },
     { id: 'donors',    label: `Donors (${donors.length})` },
     { id: 'pipeline',  label: 'Pipeline' },
     { id: 'campaigns', label: `Campaigns (${campaigns.length})` },
@@ -39,7 +52,10 @@ export default function Dashboard({ donors, campaigns, actions, lastRefresh, onR
     { id: 'officers',  label: 'Officers', adminOnly: true },
   ]
 
-  const TABS = ALL_TABS.filter(t => !t.adminOnly || isAdmin)
+  const isDonorServices = currentUser?.is_donor_services || isAdmin
+  const TABS = ALL_TABS.filter(t =>
+    (!t.adminOnly || isAdmin) && (!t.donorServicesOnly || isDonorServices)
+  )
 
   // Non-admins are always locked to their own officer (never 'all')
   const effectiveOfficer = isAdmin
@@ -153,8 +169,17 @@ export default function Dashboard({ donors, campaigns, actions, lastRefresh, onR
           <ActionsPanel actions={filteredActions} donors={isAdmin ? donors : filteredDonors} currentUser={currentUser} />
         )}
 
+        {activeTab === 'qualqueue' && isDonorServices && (
+          <QualQueue
+            donors={donors}
+            qualificationStatus={qualificationStatus}
+            currentUser={currentUser}
+            onQualificationUpdate={handleQualificationUpdate}
+          />
+        )}
+
         {activeTab === 'donors' && (
-          <DonorIntel donors={filteredDonors} currentUser={currentUser} />
+          <DonorIntel donors={filteredDonors} currentUser={currentUser} qualificationStatus={qualificationStatus} />
         )}
 
         {activeTab === 'pipeline' && (

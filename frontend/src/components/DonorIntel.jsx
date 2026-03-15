@@ -41,16 +41,26 @@ function RFMBadge({ r, f, m }) {
   )
 }
 
-export default function DonorIntel({ donors, currentUser }) {
+export default function DonorIntel({ donors, currentUser, qualificationStatus = {} }) {
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState('ai_score')
   const [tierFilter, setTierFilter] = useState('all')
   const [page, setPage] = useState(0)
   const [expanded, setExpanded] = useState(null)
+  const [qualQueueFilter, setQualQueueFilter] = useState(false)
   const PAGE_SIZE = 25
+
+  const isDonorServices = currentUser?.is_donor_services || currentUser?.is_admin
 
   const filtered = useMemo(() => {
     let list = donors
+    if (qualQueueFilter) {
+      list = list.filter(d =>
+        d.gift_officer === 'Donor Services' &&
+        (d.rfm_frequency || 0) >= 4 &&
+        (d.total_giving || 0) < 5000
+      )
+    }
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       list = list.filter(d =>
@@ -65,8 +75,9 @@ export default function DonorIntel({ donors, currentUser }) {
         return tier.id === tierFilter
       })
     }
+    const effectiveSort = qualQueueFilter ? 'upgrade_prop' : sortBy
     return [...list].sort((a, b) => {
-      switch (sortBy) {
+      switch (effectiveSort) {
         case 'ai_score':       return (b.ai_score || 0) - (a.ai_score || 0)
         case 'lapse_risk':     return (b.lapse_risk || 0) - (a.lapse_risk || 0)
         case 'upgrade_prop':   return (b.upgrade_propensity || 0) - (a.upgrade_propensity || 0)
@@ -76,7 +87,7 @@ export default function DonorIntel({ donors, currentUser }) {
         default: return 0
       }
     })
-  }, [donors, search, sortBy, tierFilter])
+  }, [donors, search, sortBy, tierFilter, qualQueueFilter])
 
   const pages = Math.ceil(filtered.length / PAGE_SIZE)
   const shown = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
@@ -111,6 +122,18 @@ export default function DonorIntel({ donors, currentUser }) {
             <option key={o.id} value={o.id}>Sort: {o.label}</option>
           ))}
         </select>
+        {isDonorServices && (
+          <button
+            onClick={() => { setQualQueueFilter(prev => !prev); setPage(0) }}
+            className={`text-sm font-medium px-3 py-2 rounded-lg border transition-colors ${
+              qualQueueFilter
+                ? 'bg-teal text-white border-teal'
+                : 'bg-white text-gray-700 border-gray-200 hover:border-teal'
+            }`}
+          >
+            Qual Queue
+          </button>
+        )}
       </div>
 
       <p className="text-xs text-gray-400 mb-3">
@@ -148,6 +171,21 @@ export default function DonorIntel({ donors, currentUser }) {
                       <div className="flex items-center gap-1.5">
                         <span className="font-medium text-gray-800">{donor.full_name}</span>
                         <EntityBadge entityType={donor.entity_type} primaryAffiliation={donor.primary_affiliation} />
+                        {qualQueueFilter && qualificationStatus[donor.sf_id] && (
+                          <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold border ${
+                            qualificationStatus[donor.sf_id].status === 'qualified_routing'
+                              ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                              : qualificationStatus[donor.sf_id].status === 'in_review'
+                              ? 'bg-blue-100 text-blue-700 border-blue-200'
+                              : qualificationStatus[donor.sf_id].status === 'not_qualified'
+                              ? 'bg-gray-100 text-gray-500 border-gray-200'
+                              : qualificationStatus[donor.sf_id].status === 'revisit_later'
+                              ? 'bg-amber-100 text-amber-700 border-amber-200'
+                              : 'bg-gray-100 text-gray-600 border-gray-200'
+                          }`}>
+                            {qualificationStatus[donor.sf_id].status?.replace(/_/g, ' ').toUpperCase() || 'SCREENED'}
+                          </span>
+                        )}
                       </div>
                       {donor.gift_officer && (
                         <div className="text-xs text-gray-400">{donor.gift_officer}</div>
@@ -183,7 +221,7 @@ export default function DonorIntel({ donors, currentUser }) {
                   isExpanded && (
                     <tr key={`${donor.sf_id}-exp`} className="bg-teal/5">
                       <td colSpan={9} className="px-4 py-4">
-                        <DonorDetail donor={donor} currentUser={currentUser} />
+                        <DonorDetail donor={donor} currentUser={currentUser} qualificationStatus={qualificationStatus} />
                       </td>
                     </tr>
                   )
@@ -252,7 +290,7 @@ const CONFIDENCE_LEVELS = ['Very High', 'High', 'Medium', 'Low', 'Very Low']
 const DONOR_TYPES = ['Individual', 'Organization', 'Foundation', 'Corporation', 'Church', 'Government', 'Other']
 const ASK_STYLES = ['In Person', 'Phone Call', 'Video Call', 'Email', 'Written Proposal', 'Event', 'Other']
 
-function DonorDetail({ donor, currentUser }) {
+function DonorDetail({ donor, currentUser, qualificationStatus = {} }) {
   const [stage, setStage] = useState(donor.stage || '')
   const [pendingStage, setPendingStage] = useState(stage)
   const [stageNotes, setStageNotes] = useState('')
@@ -369,8 +407,31 @@ function DonorDetail({ donor, currentUser }) {
     }
   }
 
+  // Check if qualification notes should be shown to this gift officer
+  const qualRecord = qualificationStatus[donor.sf_id]
+  const showQualNotes = qualRecord?.status === 'qualified_routing' &&
+    qualRecord?.routed_to_sf_id && currentUser?.sf_user_id &&
+    qualRecord.routed_to_sf_id === currentUser.sf_user_id
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {showQualNotes && (
+        <div className="md:col-span-2 bg-teal/10 rounded-lg p-3 border border-teal/30">
+          <p className="text-xs font-semibold text-teal uppercase tracking-wider mb-2">Qualification Notes</p>
+          <div className="space-y-1 text-sm text-gray-700">
+            {qualRecord.screened_by && (
+              <p><span className="font-medium text-gray-500">Screened by:</span> {qualRecord.screened_by}</p>
+            )}
+            {qualRecord.screened_at && (
+              <p><span className="font-medium text-gray-500">Screened:</span> {new Date(qualRecord.screened_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</p>
+            )}
+            {qualRecord.notes && (
+              <p className="mt-1">{qualRecord.notes}</p>
+            )}
+          </div>
+        </div>
+      )}
+
       {donor.ai_narrative && (
         <div className="md:col-span-2 bg-white rounded-lg p-3 border border-teal/20">
           <p className="text-xs font-semibold text-teal/70 uppercase tracking-wider mb-1">AI Donor Portrait</p>

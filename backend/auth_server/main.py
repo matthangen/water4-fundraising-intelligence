@@ -55,6 +55,9 @@ DONOR_SERVICES_EMAIL = "ds.qualify@water4.org"
 # Name overrides: force specific display names regardless of Google profile
 NAME_OVERRIDES      = {DONOR_SERVICES_EMAIL: "Donor Services"}
 
+# Email overrides: map Google login email → Salesforce email when they differ
+SF_EMAIL_OVERRIDES  = {DONOR_SERVICES_EMAIL: "donorservices@water4.org"}
+
 # ── Session helpers ────────────────────────────────────────────────────────────
 
 def _redirect_uri(request: Request) -> str:
@@ -89,7 +92,8 @@ def _sf_user_id(email: str) -> str:
             security_token=creds["security_token"],
             domain=creds.get("domain", "login"),
         )
-        result = sf.query(f"SELECT Id FROM User WHERE Email = '{email}' AND IsActive = true LIMIT 1")
+        safe_email = email.replace("\\", "\\\\").replace("'", "\\'")
+        result = sf.query(f"SELECT Id FROM User WHERE Email = '{safe_email}' AND IsActive = true LIMIT 1")
         if result["records"]:
             return result["records"][0]["Id"]
     except Exception as e:
@@ -144,7 +148,8 @@ async def callback(request: Request, code: str = None, error: str = None):
             status_code=403,
         )
 
-    sf_id = _sf_user_id(email)
+    sf_email = SF_EMAIL_OVERRIDES.get(email, email)
+    sf_id = _sf_user_id(sf_email)
     name = NAME_OVERRIDES.get(email, info.get("name", ""))
     session = {"email": email, "name": name, "picture": info.get("picture", ""), "sf_user_id": sf_id}
     logger.info(f"Login: {email} (SF: {sf_id or 'not found'})")
